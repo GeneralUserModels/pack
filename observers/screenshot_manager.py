@@ -1,6 +1,8 @@
 import mss
 import threading
 from contextlib import contextmanager
+from PIL import Image
+import io
 
 
 class ScreenshotManager:
@@ -25,17 +27,27 @@ class ScreenshotManager:
                     return mon
             return sct.monitors[0]
 
-    def take_screenshot_for_monitor(self, mon: dict) -> tuple[bytes, tuple[int, int]]:
+    def take_screenshot_for_monitor(self, mon: dict, quality: int = 95) -> tuple[bytes, tuple[int, int]]:
         with self._get_sct_context(with_cursor=True) as sct:
             img = sct.grab(mon)
-            png = mss.tools.to_png(img.rgb, img.size)
-            return png, img.size
+            pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
 
-    def take_virtual_screenshot(self) -> tuple[bytes, tuple[int, int]]:
+            jpeg_buffer = io.BytesIO()
+            pil_img.save(jpeg_buffer, format='JPEG', quality=quality)
+            jpeg_data = jpeg_buffer.getvalue()
+
+            return jpeg_data, img.size
+
+    def take_virtual_screenshot(self, quality: int = 95) -> tuple[bytes, tuple[int, int]]:
         with self._get_sct_context(with_cursor=True) as sct:
             img = sct.grab(sct.monitors[0])
-            png = mss.tools.to_png(img.rgb, img.size)
-            return png, img.size
+            pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+
+            jpeg_buffer = io.BytesIO()
+            pil_img.save(jpeg_buffer, format='JPEG', quality=quality)
+            jpeg_data = jpeg_buffer.getvalue()
+
+            return jpeg_data, img.size
 
     def close(self):
         """Clean up any remaining resources."""

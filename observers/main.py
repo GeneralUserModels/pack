@@ -33,7 +33,7 @@ def io_worker(event_queue: EventQueue):
             continue
 
         if raw.screenshot_bytes is not None:
-            shot_path = SCREENSHOT_DIR / f"{raw.timestamp}_{raw.event}.png"
+            shot_path = SCREENSHOT_DIR / f"{raw.timestamp}_{raw.event}.jpg"
             with open(shot_path, "wb") as imgf:
                 imgf.write(raw.screenshot_bytes)
             raw.screenshot_path = str(shot_path)
@@ -52,13 +52,13 @@ def poll_worker(screenshot_manager: ScreenshotManager, event_queue: EventQueue, 
 
             active_mon = screenshot_manager.get_active_monitor(x, y)
 
-            png_bytes, (w, h) = screenshot_manager.take_virtual_screenshot()
+            jpg_bytes, (w, h) = screenshot_manager.take_virtual_screenshot()
 
             event_queue.enqueue(
                 event_type="poll",
                 details={"position": [x, y]},
                 monitor=active_mon,
-                screenshot=(png_bytes, (w, h))
+                screenshot=(jpg_bytes, (w, h))
             )
 
             time.sleep(interval)
