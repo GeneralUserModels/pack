@@ -16,7 +16,7 @@ dependencies = [
     "ipdb (>=0.13.13,<0.14.0)"
 ]
 description = ""
-name = "gum"
+name = "pack"
 requires-python = ">=3.11,<=3.13"
 version = "0.1.0"
 
