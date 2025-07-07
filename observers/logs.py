@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 
 
 @dataclass
@@ -20,3 +20,23 @@ class RawLog:
 
     def __repr__(self) -> str:
         return f"RawLog(timestamp={self.timestamp}, event={self.event}, details={self.details})"
+
+
+@dataclass
+class EventLog:
+    start_timestamp: str
+    end_timestamp: str
+    monitor: Dict[str, int]
+    start_screenshot_path: Optional[str] = None
+    end_screenshot_path: Optional[str] = None
+    start_cursor_pos: Optional[Tuple[int, int]] = None
+    end_cursor_pos: Optional[Tuple[int, int]] = None
+    click_positions: Optional[List[Tuple[int, int]]] = None
+    scroll_directions: Optional[List[Tuple[int, int]]] = None
+    keys_pressed: Optional[List[List[str]]] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def __repr__(self) -> str:
+        return f"Log(start_timestamp={self.start_timestamp}, end_timestamp={self.end_timestamp}, keys_pressed={''.join(self.keys_pressed)})"

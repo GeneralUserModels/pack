@@ -76,6 +76,7 @@ def analyze_breaks(events, event_types=None):
         breaks.append(timedelta(seconds=(ts - last_ts).total_seconds()).total_seconds())
         last_ts = ts
 
+    print(len([b for b in breaks if b < 0.1]))
     plt.figure(figsize=(10, 6))
     plt.hist(breaks, bins=500, edgecolor='black')
     plt.title('Break Duration Histogram')
