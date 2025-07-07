@@ -8,13 +8,13 @@ import numpy as np
 
 from observers.logs import EventLog
 
-PERCENTILE = 95
+PERCENTILE = 99
 
 EVENT_Y = {
     "mouse_move": 1,
     "mouse_down": 2,
-    "mouse_scroll": 4,
-    "keyboard_press": 5,
+    "mouse_scroll": 3,
+    "keyboard_press": 4,
 }
 
 SPECIAL_KEYS = {
@@ -72,21 +72,25 @@ def calculate_breaks(events: list, event_y: dict, percentile: int):
 
 
 def _aggregate_event(events_slice: list) -> EventLog:
+    # TODOS:
+    # - Mouse movement and clicks: Trace trahectories between click and move
+    cursor_pos = [ev.get("details", {}).get('position', 0) for ev in events_slice if ev.get("details", {}).get('position', 0)]
     return EventLog(
         start_timestamp=events_slice[0]['timestamp'],
         end_timestamp=events_slice[-1]['timestamp'],
         monitor=events_slice[0]['monitor'],
         start_screenshot_path=events_slice[0].get('screenshot_path'),
         end_screenshot_path=events_slice[-1].get('screenshot_path'),
-        start_cursor_pos=events_slice[0].get('cursor_pos'),
-        end_cursor_pos=events_slice[-1].get('cursor_pos'),
-        click_positions=[ev.get('click_position') for ev in events_slice if 'click_position' in ev],
-        scroll_directions=list({ev.get('scroll_direction') for ev in events_slice if 'scroll_direction' in ev}),
-        keys_pressed=[extract_key(ev['details'], pretty=True) for ev in events_slice if ev['event'] == 'keyboard_press' and extract_key(ev['details'], pretty=True)]
+        start_cursor_pos=cursor_pos[0] if cursor_pos else None,
+        end_cursor_pos=cursor_pos[-1] if cursor_pos else None,
+        click_positions=[ev.get("details", {}) for ev in events_slice if ev.get("event") == "mouse_down" and ev.get("details", {}).get('position')],
+        scroll_directions=list([ev.get('details', {}).get("scroll") for ev in events_slice if ev.get('event') == 'mouse_scroll' and ev.get('details', {}).get("scroll")]),
+        keys_pressed=[extract_key(ev['details']) for ev in events_slice if ev['event'] == 'keyboard_press' and extract_key(ev['details'])]
     )
 
 
 def aggregate_logs(events: list, breaks: dict):
+    # TODO: Add polling
     events_sorted = sorted(events, key=lambda e: e['timestamp'])
     edges = sorted(set([b.timestamp() for spans in breaks.values() for bstart, bend in spans for b in (bstart, bend)]))
     logs = []
@@ -158,7 +162,7 @@ def plot(events_path: Path):
         end = datetime.strptime(log.end_timestamp, "%Y-%m-%d_%H-%M-%S-%f")
         ax4.broken_barh([(mdates.date2num(start), mdates.date2num(end) - mdates.date2num(start))],
                         (y_locs[idx] - 0.4, 0.8), facecolors='tab:blue')
-        keys = ''.join(log.keys_pressed)
+        keys = ''.join([SPECIAL_KEYS.get(k, k) for k in log.keys_pressed])
         ax4.text(mdates.date2num(start), y_locs[idx], keys, va='center', ha='left', fontsize=8)
     ax4.set_ylim(0, len(aggregated))
     ax4.set_yticks(y_locs)
@@ -171,8 +175,11 @@ def plot(events_path: Path):
     plt.tight_layout()
     fig.autofmt_xdate()
     plt.show()
+    return aggregated
 
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-04_15-31-18-439993' / 'events.jsonl'
-    plot(path)
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-03_01-04-03-001589' / 'events.jsonl'
+    agg = plot(path)
+    with open(path.with_suffix('.agg.json'), 'w') as f:
+        json.dump([log.to_dict() for log in agg], f, indent=2)
