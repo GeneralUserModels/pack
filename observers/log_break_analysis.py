@@ -89,7 +89,7 @@ def analyze_breaks(events, event_types=None):
 if __name__ == "__main__":
     events = get_events()
     event_types = [
-        # "poll",
+        "poll",
         "mouse_move",
         "mouse_down",
         "mouse_up",
