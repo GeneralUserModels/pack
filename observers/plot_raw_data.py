@@ -64,6 +64,8 @@ def calculate_breaks(events: list, event_y: dict, percentile: int):
 
     breaks, durations, thresholds = {}, {}, {}
     for evt, ts_list in per_event_ts.items():
+        if evt == "mouse_down":
+            continue
         if len(ts_list) < 2:
             breaks[evt], durations[evt], thresholds[evt] = [], [], 0
             continue
@@ -74,6 +76,73 @@ def calculate_breaks(events: list, event_y: dict, percentile: int):
         idx = np.where(deltas >= thresh)[0]
         breaks[evt] = [(ts_list[i], ts_list[i + 1]) for i in idx]
         durations[evt] = deltas.tolist()
+
+    MOUSE_DOWN_DEBOUNCE = 500  # milliseconds
+    MOUSE_DOWN_POS_OFFSET = 0.01  # % of screen height, width
+    mouse_down_events = [e for e in events if e["event"] == "mouse_down"]
+
+    processed_mouse_events = []
+    last_pos, last_time = None, None
+
+    def remove_lst_double_click(ts, pos, events):
+        for i in range(len(events) - 1, -1, -1):
+            evt_ts = datetime.strptime(events[i]['timestamp'], "%Y-%m-%d_%H-%M-%S-%f")
+            if evt_ts == ts and events[i]['details'].get('position') == pos:
+                del events[i]
+        return events
+
+    for evt in mouse_down_events:
+        ts = datetime.strptime(evt['timestamp'], "%Y-%m-%d_%H-%M-%S-%f")
+        button = evt['details'].get('button', 'unknown')
+
+        if "left" not in button.lower():
+            processed_mouse_events.append(evt)
+            continue
+
+        pos = evt.get('details', {}).get('position', [0, 0])
+        monitor = evt.get('monitor', {})
+        monitor_dim = [monitor.get("width", 1920), monitor.get("height", 1080)]
+
+        new_evt = evt.copy()
+        new_evt['details'] = evt['details'].copy()
+
+        if last_pos is None or last_time is None:
+            last_pos, last_time = pos, ts
+            processed_mouse_events.append(new_evt)
+            continue
+
+        time_diff = (ts - last_time).total_seconds() * 1000
+
+        if (time_diff <= MOUSE_DOWN_DEBOUNCE and
+            abs(pos[0] - last_pos[0]) <= MOUSE_DOWN_POS_OFFSET * monitor_dim[0] and
+                abs(pos[1] - last_pos[1]) <= MOUSE_DOWN_POS_OFFSET * monitor_dim[1]):
+
+            new_evt['details']['double_click'] = True
+            processed_mouse_events.append(new_evt)
+            processed_mouse_events = remove_lst_double_click(last_time, last_pos, processed_mouse_events)
+        else:
+            last_pos, last_time = pos, ts
+            processed_mouse_events.append(new_evt)
+
+    mouse_down_timestamps = []
+    for evt in processed_mouse_events:
+        ts = datetime.strptime(evt['timestamp'], "%Y-%m-%d_%H-%M-%S-%f")
+        mouse_down_timestamps.append(ts)
+
+    mouse_down_breaks = []
+    if len(mouse_down_timestamps) > 1:
+        for i in range(len(mouse_down_timestamps) - 1):
+            mouse_down_breaks.append((mouse_down_timestamps[i], mouse_down_timestamps[i + 1]))
+
+    breaks["mouse_down"] = mouse_down_breaks
+    durations["mouse_down"] = []
+    thresholds["mouse_down"] = 0
+
+    events_dict = {(e['timestamp'], e['event']): e for e in events}
+    for proc_evt in processed_mouse_events:
+        key = (proc_evt['timestamp'], proc_evt['event'])
+        if key in events_dict:
+            events_dict[key]['details'] = proc_evt['details']
 
     return timestamps, y_positions, labels, breaks, durations, thresholds
 
@@ -109,23 +178,25 @@ def aggregate_logs(events: list, breaks: dict):
     for edge in edges:
         for rel_idx, event in enumerate(events_sorted[start_idx:], start=start_idx):
             ev_time = datetime.strptime(event['timestamp'], "%Y-%m-%d_%H-%M-%S-%f").timestamp()
-            if ev_time == edge or json.dumps(event.get("monitor", {})) != json.dumps(events_sorted[start_idx]['monitor']):
+            switched_screen = json.dumps(event.get("monitor", {})) != json.dumps(events_sorted[start_idx]['monitor'])
+            if ev_time == edge or switched_screen:
                 cut_idx = rel_idx
                 break
         else:
             cut_idx = len(events_sorted) - 1
+            switched_screen = False
 
         last_event = events_sorted[cut_idx]
         evt_type = last_event['event']
 
-        if evt_type == 'mouse_down':
+        if evt_type == 'mouse_down' and not switched_screen:
             button = last_event['details'].get('button')
             for lookahead in events_sorted[cut_idx + 1:]:
                 if lookahead['event'] == 'mouse_up' and lookahead['details'].get('button') == button:
                     cut_idx = events_sorted.index(lookahead)
                     break
 
-        elif evt_type == 'keyboard_press':
+        elif evt_type == 'keyboard_press' and not switched_screen:
             key = extract_key(last_event['details'], pretty=False)
             for lookahead in events_sorted[cut_idx + 1:]:
                 if lookahead['event'] == 'keyboard_release' and extract_key(lookahead['details'], pretty=False) == key:
@@ -193,9 +264,6 @@ def create_interactive_plot(events_path: Path):
                 line_width=0,
                 row=1, col=1
             )
-
-    time_range = max(timestamps) - min(timestamps)
-    bin_size = time_range.total_seconds() / 500
 
     df = pd.DataFrame({'timestamp': timestamps, 'event': [list(EVENT_Y.keys())[list(EVENT_Y.values()).index(y)] for y in y_positions]})
     df['timestamp_bin'] = pd.cut(df['timestamp'], bins=100)
@@ -315,7 +383,7 @@ def plot_interactive(events_path: Path):
 
     fig.show()
 
-    with open(events_path.with_suffix('.agg.json'), 'w') as f:
+    with open(events_path.with_suffix(f'.agg_{PERCENTILE}.json'), 'w') as f:
         json.dump([log.to_dict() for log in aggregated], f, indent=2)
 
     fig.write_html(events_path.with_suffix(f'.{PERCENTILE}_perc_interactive.html'))

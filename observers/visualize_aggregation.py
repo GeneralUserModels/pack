@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / 'events.agg.json'
-OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / 'agg_visualizations'
+PERCENTILE = 95
+
+AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'events.agg_{PERCENTILE}.json'
+OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'agg_{PERCENTILE}_visualizations'
 BORDER_WIDTH = 10
 CLICK_MARKER_RADIUS = 8
 
@@ -90,13 +92,6 @@ def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor) -> Image.Im
     return img
 
 
-def load_font(size=14):
-    try:
-        return ImageFont.truetype("arial.ttf", size)
-    except IOError:
-        return ImageFont.load_default()
-
-
 def format_event_info(log: dict):
     info_lines = []
 
@@ -112,7 +107,8 @@ def format_event_info(log: dict):
         for i, click in enumerate(clicks, 1):
             button = click.get('button', 'unknown')
             position = click.get('position', click)
-            info_lines.append(f"  {i}. {button} at {position}")
+            is_double = click.get("double_click", False)
+            info_lines.append(f"  {i}. {button} at {position} {' (double click)' if is_double else ''}")
     else:
         info_lines.append("Clicks: <none>")
 
