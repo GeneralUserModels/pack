@@ -159,7 +159,8 @@ def _aggregate_event(events_slice: list) -> EventLog:
         end_cursor_pos=cursor_pos[-1] if cursor_pos else None,
         click_positions=[ev.get("details", {}) for ev in events_slice if ev.get("event") == "mouse_down" and ev.get("details", {}).get('position')],
         scroll_directions=list([ev.get('details', {}).get("scroll") for ev in events_slice if ev.get('event') == 'mouse_scroll' and ev.get('details', {}).get("scroll")]),
-        keys_pressed=[extract_key(ev['details']) for ev in events_slice if ev['event'] == 'keyboard_press' and extract_key(ev['details'])]
+        keys_pressed=[extract_key(ev['details']) for ev in events_slice if ev['event'] == 'keyboard_press' and extract_key(ev['details'])],
+        events=[{"timestamp": ev["timestamp"], "event_type": ev['event'], "details": ev.get("details", {})} for ev in events_slice]
     )
 
 
