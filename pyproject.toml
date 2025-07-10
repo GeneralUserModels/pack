@@ -1,9 +1,8 @@
 [project]
-# Those dependencies are a Python Standard (not Poetry) and are defined
-# here: https://packaging.python.org/en/latest/specifications/dependency-specifiers/#dependency-specifiers
-# Poetry uses those dependencies though!
-# More details about local version identifier (e.g. +cu126)
-# can be found here: https://packaging.python.org/en/latest/specifications/version-specifiers/
+name = "pack"
+version = "0.1.0"
+description = ""
+requires-python = ">=3.11,<=3.13"
 dependencies = [
     "pynput (>=1.8.1,<2.0.0)",
     "mss (>=10.0.0,<11.0.0)",
@@ -15,12 +14,8 @@ dependencies = [
     "ruptures (>=1.1.9,<2.0.0)",
     "ipdb (>=0.13.13,<0.14.0)",
     "plotly (>=6.2.0,<7.0.0)",
-    "nbformat (>=5.10.4,<6.0.0)"
+    "nbformat (>=5.10.4,<6.0.0)",
 ]
-description = ""
-name = "pack"
-requires-python = ">=3.11,<=3.13"
-version = "0.1.0"
 
-[tool.poetry]
-package-mode = false
+[tool.uv]
+package = false

@@ -17,7 +17,7 @@ def get_events(session="session_2025-07-04_09-31-33-777536"):
     return events
 
 
-def analyze_breaks_by_event_type(events, event_types=None, percentile=90):
+def analyze_breaks_by_event_type(events, event_types=None, percentile=95):
     grouped_events = defaultdict(list)
     for event in events:
         if event_types and event['event'] not in event_types:

@@ -193,6 +193,7 @@ def aggregate_logs(events: list, breaks: dict):
         if evt_type == 'mouse_down' and not switched_screen:
             button = last_event['details'].get('button')
             for lookahead in events_sorted[cut_idx + 1:]:
+                # TODO: Threshold
                 if lookahead['event'] == 'mouse_up' and lookahead['details'].get('button') == button:
                     cut_idx = events_sorted.index(lookahead)
                     break
@@ -200,6 +201,7 @@ def aggregate_logs(events: list, breaks: dict):
         elif evt_type == 'keyboard_press' and not switched_screen:
             key = extract_key(last_event['details'], pretty=False)
             for lookahead in events_sorted[cut_idx + 1:]:
+                # TODO: Threshold
                 if lookahead['event'] == 'keyboard_release' and extract_key(lookahead['details'], pretty=False) == key:
                     cut_idx = events_sorted.index(lookahead)
                     break
