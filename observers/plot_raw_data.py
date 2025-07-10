@@ -6,7 +6,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from observers.logs import EventLog
+from observers.logs import AggregatedLog
 
 PERCENTILE = 95
 
@@ -147,9 +147,9 @@ def calculate_breaks(events: list, event_y: dict, percentile: int):
     return timestamps, y_positions, labels, breaks, durations, thresholds
 
 
-def _aggregate_event(events_slice: list) -> EventLog:
+def _aggregate_event(events_slice: list) -> AggregatedLog:
     cursor_pos = [ev.get("details", {}).get('position', 0) for ev in events_slice if ev.get("details", {}).get('position', 0)]
-    return EventLog(
+    return AggregatedLog(
         start_timestamp=events_slice[0]['timestamp'],
         end_timestamp=events_slice[-1]['timestamp'],
         monitor=events_slice[0]['monitor'],
@@ -232,7 +232,7 @@ def create_interactive_plot(events_path: Path):
             'Event Timeline with Break Spans',
             'Event Count Over Time',
             'Break Duration Distribution',
-            'Aggregated EventLog Spans'
+            'Aggregated AggregatedLog Spans'
         ]
     )
 

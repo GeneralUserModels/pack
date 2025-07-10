@@ -23,7 +23,7 @@ class RawLog:
 
 
 @dataclass
-class EventLog:
+class AggregatedLog:
     start_timestamp: str
     end_timestamp: str
     monitor: Dict[str, int]
