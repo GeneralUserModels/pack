@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import time
 import datetime
 import json
@@ -9,11 +7,10 @@ from queue import Empty
 
 from pynput import keyboard, mouse
 
-from observers.logs import RawLog
-from observers.screenshot_manager import ScreenshotManager
-from observers.input_event_handler import InputEventHandler
-from observers.event_queue import EventQueue
+from record import ScreenshotManager, InputEventHandler, EventQueue
+from modules import RawLog
 
+# TODO: factor out
 SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")}"
 SCREENSHOT_DIR = SESSION_DIR / "screenshots"
 LOG_FILE = SESSION_DIR / "events.jsonl"
@@ -25,7 +22,6 @@ stop_event = threading.Event()
 
 
 def io_worker(event_queue: EventQueue):
-    """Consumes RawLog objects, writes screenshots to disk and logs JSON."""
     while not stop_event.is_set() or not event_queue.empty():
         try:
             raw: RawLog = event_queue.queue.get(timeout=0.1)
@@ -33,7 +29,7 @@ def io_worker(event_queue: EventQueue):
             continue
 
         if raw.screenshot_bytes is not None:
-            shot_path = SCREENSHOT_DIR / f"{raw.timestamp}_{raw.event}.jpg"
+            shot_path = SCREENSHOT_DIR / f"{raw.timestamp}_{raw.event_type}.jpg"
             with open(shot_path, "wb") as imgf:
                 imgf.write(raw.screenshot_bytes)
             raw.screenshot_path = str(shot_path)
@@ -56,7 +52,8 @@ def poll_worker(screenshot_manager: ScreenshotManager, event_queue: EventQueue, 
 
             event_queue.enqueue(
                 event_type="poll",
-                details={"position": [x, y]},
+                details={},
+                cursor_pos=[x, y],
                 monitor=active_mon,
                 screenshot=(jpg_bytes, (w, h))
             )

@@ -20,7 +20,13 @@ class InputEventHandler:
         mon = self.screenshot_manager.get_active_monitor(x, y)
 
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
-        self.queue.enqueue("keyboard_press", {"key": k}, mon, (png, size))
+        self.queue.enqueue(
+            event_type="keyboard_press",
+            details={"key": k},
+            monitor=mon,
+            cursor_pos=[x, y],
+            screenshot=(png, size)
+        )
 
     def on_release(self, key):
         try:
@@ -30,13 +36,25 @@ class InputEventHandler:
         x, y = self.mouse_controller.position
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
-        self.queue.enqueue("keyboard_release", {"key": k}, mon, (png, size))
+        self.queue.enqueue(
+            event_type="keyboard_release",
+            details={"key": k},
+            monitor=mon,
+            cursor_pos=[x, y],
+            screenshot=(png, size)
+        )
 
     def on_click(self, x, y, button, pressed):
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
         evt = "mouse_down" if pressed else "mouse_up"
-        self.queue.enqueue(evt, {"button": str(button), "position": [x, y]}, mon, (png, size))
+        self.queue.enqueue(
+            event_type=evt,
+            details={"button": str(button)},
+            monitor=mon,
+            cursor_pos=[x, y],
+            screenshot=(png, size)
+        )
 
     def on_move(self, x, y):
         now = time.time()
@@ -45,9 +63,21 @@ class InputEventHandler:
         self._last_move_time = now
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
-        self.queue.enqueue("mouse_move", {"position": [x, y]}, mon, (png, size))
+        self.queue.enqueue(
+            event_type="mouse_move",
+            details={},
+            monitor=mon,
+            cursor_pos=[x, y],
+            screenshot=(png, size)
+        )
 
     def on_scroll(self, x, y, dx, dy):
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
-        self.queue.enqueue("mouse_scroll", {"position": [x, y], "scroll": [dx, dy]}, mon, (png, size))
+        self.queue.enqueue(
+            event_type="mouse_scroll",
+            details={"scroll": [dx, dy]},
+            monitor=mon,
+            cursor_pos=[x, y],
+            screenshot=(png, size)
+        )
