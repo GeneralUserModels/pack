@@ -19,11 +19,16 @@ class ScreenshotManager:
         finally:
             sct.close()
 
+    def _is_active_monitor(self, mon: dict, x: int, y: int) -> bool:
+        return all(
+            [mon["left"] <= x < mon["left"] + mon["width"],
+             mon["top"] <= y < mon["top"] + mon["height"]]
+        )
+
     def get_active_monitor(self, x: int, y: int) -> dict:
         with self._get_sct_context(with_cursor=False) as sct:
             for mon in sct.monitors[1:]:
-                if (mon["left"] <= x < mon["left"] + mon["width"] and
-                        mon["top"] <= y < mon["top"] + mon["height"]):
+                if self._is_active_monitor(mon, x, y):
                     return mon
             return sct.monitors[0]
 
