@@ -1,9 +1,11 @@
-import json
 from pathlib import Path
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import pandas as pd
+
+from aggregate.aggregate_logs import calculate_breaks, aggregate_logs
+from modules.raw_log import RawLogEvents
 
 
 PERCENTILE = 95
@@ -30,10 +32,41 @@ EVENT_COLORS = {
 }
 
 
-def create_interactive_plot(events_path: Path):
-    events = load_events(events_path, EVENT_Y)
-    timestamps, y_positions, labels, breaks, durations, thresholds = calculate_breaks(events, EVENT_Y, PERCENTILE)
-    aggregated = aggregate_logs(events, breaks)
+def extract_key(details: dict, pretty=False) -> str:
+    """Extract key from event details, with optional pretty formatting."""
+    key = details.get('key', '')
+    if not key:
+        return ''
+    key = key.replace('Key.', '')
+    return SPECIAL_KEYS.get(key, key) if pretty else key
+
+
+def prepare_plot_data(logs: RawLogEvents):
+    """Prepare data for plotting from RawLogEvents."""
+    timestamps = []
+    y_positions = []
+    labels = []
+
+    for event in logs:
+        if event.event_type not in EVENT_Y:
+            continue
+        ts = datetime.strptime(event.timestamp, "%Y-%m-%d_%H-%M-%S-%f")
+        timestamps.append(ts)
+        y_positions.append(EVENT_Y[event.event_type])
+
+        if event.event_type == 'keyboard_press':
+            labels.append(extract_key(event.details, pretty=True))
+        else:
+            labels.append('')
+
+    return timestamps, y_positions, labels
+
+
+def create_interactive_plot(logs: RawLogEvents):
+    timestamps, breaks, durations, thresholds = calculate_breaks(logs, PERCENTILE)
+    aggregated = aggregate_logs(logs, breaks)
+
+    plot_timestamps, y_positions, labels = prepare_plot_data(logs)
 
     fig = make_subplots(
         rows=4, cols=1,
@@ -49,8 +82,8 @@ def create_interactive_plot(events_path: Path):
     )
 
     for event_type in EVENT_Y:
-        event_timestamps = [ts for ts, y in zip(timestamps, y_positions) if y == EVENT_Y[event_type]]
-        event_labels = [lbl for ts, y, lbl in zip(timestamps, y_positions, labels) if y == EVENT_Y[event_type]]
+        event_timestamps = [ts for ts, y in zip(plot_timestamps, y_positions) if y == EVENT_Y[event_type]]
+        event_labels = [lbl for ts, y, lbl in zip(plot_timestamps, y_positions, labels) if y == EVENT_Y[event_type]]
 
         fig.add_trace(
             go.Scatter(
@@ -70,6 +103,8 @@ def create_interactive_plot(events_path: Path):
 
     for event_type, spans in breaks.items():
         for start_time, end_time in spans:
+            if event_type not in EVENT_Y:
+                continue
             fig.add_shape(
                 type="rect",
                 x0=start_time, x1=end_time,
@@ -80,7 +115,10 @@ def create_interactive_plot(events_path: Path):
                 row=1, col=1
             )
 
-    df = pd.DataFrame({'timestamp': timestamps, 'event': [list(EVENT_Y.keys())[list(EVENT_Y.values()).index(y)] for y in y_positions]})
+    df = pd.DataFrame({
+        'timestamp': plot_timestamps,
+        'event': [list(EVENT_Y.keys())[list(EVENT_Y.values()).index(y)] for y in y_positions]
+    })
     df['timestamp_bin'] = pd.cut(df['timestamp'], bins=100)
 
     hist_data = df.groupby(['timestamp_bin', 'event'], observed=False).size().unstack(fill_value=0)
@@ -101,26 +139,21 @@ def create_interactive_plot(events_path: Path):
                 row=2, col=1
             )
 
-    all_durations = []
-    duration_events = []
-
-    for event_type, durs in durations.items():
-        all_durations.extend(durs)
-        duration_events.extend([event_type] * len(durs))
-
-    fig.add_trace(
-        go.Histogram(
-            x=all_durations,
-            nbinsx=50,
-            name="Duration Distribution",
-            marker_color="lightblue",
-            showlegend=False,
-            hovertemplate="Duration: %{x:.2f}s<br>Count: %{y}<extra></extra>"
-        ),
-        row=3, col=1
-    )
+        fig.add_trace(
+            go.Histogram(
+                x=all_durations,
+                nbinsx=50,
+                name="Duration Distribution",
+                marker_color="lightblue",
+                showlegend=False,
+                hovertemplate="Duration: %{x:.2f}s<br>Count: %{y}<extra></extra>"
+            ),
+            row=3, col=1
+        )
 
     for event_type, thresh in thresholds.items():
+        if event_type not in EVENT_Y:
+            continue
         if thresh > 0:
             fig.add_vline(
                 x=thresh,
@@ -133,7 +166,7 @@ def create_interactive_plot(events_path: Path):
     for idx, log in enumerate(aggregated):
         start = datetime.strptime(log.start_timestamp, "%Y-%m-%d_%H-%M-%S-%f")
         end = datetime.strptime(log.end_timestamp, "%Y-%m-%d_%H-%M-%S-%f")
-        keys = ''.join([SPECIAL_KEYS.get(k, k) for k in log.keys_pressed])
+        keys = ''.join([SPECIAL_KEYS.get(k.replace("Key.", ""), k.replace("Key.", "")) for k in log.keys_pressed if k])
 
         fig.add_trace(
             go.Scatter(
@@ -194,14 +227,19 @@ def create_interactive_plot(events_path: Path):
 
 
 def plot_interactive(events_path: Path):
-    fig, aggregated = create_interactive_plot(events_path)
+    logs = RawLogEvents().load(events_path)
+    logs.sort()
+
+    fig, aggregated = create_interactive_plot(logs)
 
     fig.show()
-
-    with open(events_path.with_suffix(f'.agg_{PERCENTILE}.json'), 'w') as f:
-        json.dump([log.to_dict() for log in aggregated], f, indent=2)
 
     fig.write_html(events_path.with_suffix(f'.{PERCENTILE}_perc_interactive.html'))
     print(f"Interactive plot saved to: {events_path.with_suffix(f'.{PERCENTILE}_perc_interactive.html')}")
 
     return aggregated
+
+
+if __name__ == '__main__':
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_02-51-30-768112' / 'events.jsonl'
+    plot_interactive(path)
