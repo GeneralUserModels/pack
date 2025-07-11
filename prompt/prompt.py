@@ -75,7 +75,9 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
             {{
                 "start": "MM:SS",
                 "end": "MM:SS",
-                "task": "Description of the task, e.g. User is navigating the settings page"
+                "high_level_task": "High level task, e.g. User is interacting with the settings page",
+                "task_category": "Category of the task, e.g. Navigation, Configuration, etc.",
+                "task": "Description of the task, e.g. user pairs bluetooth earbuds in settings",
             }}
         ]
         """

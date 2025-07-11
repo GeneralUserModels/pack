@@ -396,64 +396,6 @@ def convert_to_video(logs, output_name, should_annotate=True, seconds_per_frame=
         print(f"Video specs: {width}x{height}, {fps:.2f} FPS, {len(frame_paths)} frames")
 
 
-def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='orange', bbox=None, label=None) -> Image.Image:
-    draw = ImageDraw.Draw(img)
-
-    start_x, start_y = screen_to_image_coords(start_pos, monitor, bbox)
-    end_x, end_y = screen_to_image_coords(end_pos, monitor, bbox)
-
-    if (start_x < 0 or start_y < 0 or start_x >= img.width or start_y >= img.height or
-            end_x < 0 or end_y < 0 or end_x >= img.width or end_y >= img.height):
-        return img
-
-    if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
-        return img
-
-    draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=3)
-
-    arrow_length = 15
-    arrow_angle = 25
-
-    dx = end_x - start_x
-    dy = end_y - start_y
-    angle = np.arctan2(dy, dx)
-
-    arrow_angle_rad = np.radians(arrow_angle)
-    x1 = end_x - arrow_length * np.cos(angle - arrow_angle_rad)
-    y1 = end_y - arrow_length * np.sin(angle - arrow_angle_rad)
-    x2 = end_x - arrow_length * np.cos(angle + arrow_angle_rad)
-    y2 = end_y - arrow_length * np.sin(angle + arrow_angle_rad)
-
-    draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill=color, outline='darkorange')
-
-    draw.ellipse([(start_x - 4, start_y - 4), (start_x + 4, start_y + 4)],
-                 fill='lime', outline='darkgreen', width=2)
-
-    return img
-
-
-def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int, bbox=None) -> Image.Image:
-    """Draw click markers on the image (updated for bounding box)"""
-    draw = ImageDraw.Draw(img)
-    for click in click_positions:
-        button = click.get('button', 'Button.left')
-        position = click.get('position', click)
-
-        img_x, img_y = screen_to_image_coords(position, monitor, bbox)
-
-        if img_x < 0 or img_y < 0 or img_x >= img.width or img_y >= img.height:
-            continue
-
-        color = BUTTON_COLORS.get(button, 'yellow')
-
-        draw.ellipse(
-            [(img_x - marker_radius, img_y - marker_radius),
-             (img_x + marker_radius, img_y + marker_radius)],
-            fill=color, outline='black', width=2
-        )
-    return img
-
-
 def annotate_image(img: Image.Image, events, monitor, prev_end_cursor=None, bbox=None):
     """Annotate image with cursor movements and mouse events (updated for bounding box)"""
     movements = get_cursor_movements(events)
@@ -462,7 +404,7 @@ def annotate_image(img: Image.Image, events, monitor, prev_end_cursor=None, bbox
         img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor, color, bbox)
 
     mouse_events = extract_mouse_events(events)
-    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS, bbox)
+    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS)
 
     if prev_end_cursor and events:
         first_cursor = events[0].get('cursor_pos', [])

@@ -71,7 +71,7 @@ def main():
     screenshot_manager = ScreenshotManager()
 
     threading.Thread(target=io_worker, args=(event_queue,), daemon=True).start()
-    threading.Thread(target=poll_worker, args=(screenshot_manager, event_queue, 1.0), daemon=True).start()
+    # threading.Thread(target=poll_worker, args=(screenshot_manager, event_queue, 1.0), daemon=True).start()
 
     h = InputEventHandler(event_queue, screenshot_manager)
 
