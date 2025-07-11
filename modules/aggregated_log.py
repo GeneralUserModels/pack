@@ -50,5 +50,11 @@ class AggregatedLog:
             events=raw_log_events.format_to_event_list()
         )
 
+    def to_prompt(self, start_timestamp):
+        delta = self.timestamp - start_timestamp
+        total_seconds = int(delta.total_seconds())
+        formatted_time = f"{total_seconds // 60:02}:{total_seconds % 60:02}"
+        return f"Log from {self.start_timestamp} to {self.end_timestamp} with {len(self.events)} events."
+
     def __repr__(self) -> str:
         return f"Log(start_timestamp={self.start_timestamp}, end_timestamp={self.end_timestamp}, keys_pressed={''.join(self.keys_pressed)})"

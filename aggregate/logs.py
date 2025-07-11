@@ -7,6 +7,7 @@ from modules import AggregatedLog, RawLogEvents
 
 PERCENTILE = 95
 
+MAX_RELEASE_EVENT_DURATION = 1 # seconds, used to filter out noise in keyboard events
 MOUSE_DOWN_DEBOUNCE = 500  # milliseconds
 MOUSE_DOWN_POS_OFFSET = 0.01  # % of screen height, width
 
@@ -125,10 +126,15 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
 
     for edge in edges:
         for rel_idx, event in enumerate(events[start_idx:], start=start_idx):
+            if event.event_type == "poll":
+                continue
             ev_time = datetime.strptime(event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()
             switched_screen = json.dumps(event.monitor) != json.dumps(events[start_idx].monitor)
-            if ev_time == edge or switched_screen:
+            if ev_time == edge:
                 cut_idx = rel_idx
+                break
+            if switched_screen:
+                cut_idx = max(start_idx, rel_idx - 1)
                 break
         else:
             cut_idx = len(events) - 1
@@ -140,6 +146,9 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
         if evt_type == 'mouse_down' and not switched_screen:
             button = last_event.details.get('button')
             for lookahead in events[cut_idx + 1:]:
+                switched_screen = json.dumps(last_event.monitor) != json.dumps(lookahead.monitor)
+                if switched_screen or MAX_RELEASE_EVENT_DURATION > (datetime.strptime(lookahead.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() - datetime.strptime(last_event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()):
+                    break
                 # TODO: Threshold
                 if lookahead.event_type == 'mouse_up' and lookahead.details.get('button') == button:
                     cut_idx = events.index(lookahead)
@@ -148,6 +157,9 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
         elif evt_type == 'keyboard_press' and not switched_screen:
             key = extract_key(last_event.details)
             for lookahead in events[cut_idx + 1:]:
+                switched_screen = json.dumps(last_event.monitor) != json.dumps(lookahead.monitor)
+                if switched_screen or MAX_RELEASE_EVENT_DURATION > (datetime.strptime(lookahead.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() - datetime.strptime(last_event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()):
+                    break
                 # TODO: Threshold
                 if lookahead.event_type == 'keyboard_release' and extract_key(lookahead.details) == key:
                     cut_idx = events.index(lookahead)
@@ -168,12 +180,13 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
 def main(path, percentile=95):
     logs = RawLogEvents().load(path)
     logs.sort()
+    logs.events = [log for log in logs if log.event_type != 'poll']
     timestamps, breaks, durations, thresholds = calculate_breaks(logs, percentile)
     return aggregate_logs(logs, breaks)
 
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_02-51-30-768112' / 'events.jsonl'
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
     aggregated_logs = main(path, PERCENTILE)
     with open(path.parent / f'aggregated_logs_{PERCENTILE}.json', 'w') as f:
         json.dump([log.to_dict() for log in aggregated_logs], f, indent=4, ensure_ascii=False)

@@ -4,7 +4,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import pandas as pd
 
-from aggregate.aggregate_logs import calculate_breaks, aggregate_logs
+from aggregate.logs import calculate_breaks, aggregate_logs
 from modules.raw_log import RawLogEvents
 
 
@@ -139,17 +139,17 @@ def create_interactive_plot(logs: RawLogEvents):
                 row=2, col=1
             )
 
-        fig.add_trace(
-            go.Histogram(
-                x=all_durations,
-                nbinsx=50,
-                name="Duration Distribution",
-                marker_color="lightblue",
-                showlegend=False,
-                hovertemplate="Duration: %{x:.2f}s<br>Count: %{y}<extra></extra>"
-            ),
-            row=3, col=1
-        )
+        # fig.add_trace(
+        #     go.Histogram(
+        #         x=all_durations,
+        #         nbinsx=50,
+        #         name="Duration Distribution",
+        #         marker_color="lightblue",
+        #         showlegend=False,
+        #         hovertemplate="Duration: %{x:.2f}s<br>Count: %{y}<extra></extra>"
+        #     ),
+        #     row=3, col=1
+        # )
 
     for event_type, thresh in thresholds.items():
         if event_type not in EVENT_Y:
@@ -241,5 +241,5 @@ def plot_interactive(events_path: Path):
 
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_02-51-30-768112' / 'events.jsonl'
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
     plot_interactive(path)
