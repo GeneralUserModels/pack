@@ -67,51 +67,6 @@ class AggregatedLog:
             events=data.get("events", [])
         )
 
-    def _mm_ss_difference(self, start: str, end: str) -> str:
-        """Calculate time difference and format as MM:SS or HH:MM:SS for longer durations"""
-        def parse_ts(ts: str) -> datetime:
-            if '_' in ts:
-                date_part, time_part = ts.split('_', 1)
-
-                if '.' in time_part:
-                    time_part = time_part.split('.')[0]
-
-                time_components = time_part.split('-')
-                if len(time_components) >= 3:
-                    time_part = f"{time_components[0]}:{time_components[1]}:{time_components[2]}"
-
-                datetime_str = f"{date_part}T{time_part}"
-                return datetime.fromisoformat(datetime_str)
-            else:
-                return datetime.fromisoformat(ts)
-
-        try:
-            start_dt = parse_ts(start)
-            end_dt = parse_ts(end)
-        except ValueError as e:
-            return f"ERROR: Invalid timestamp format - {str(e)}"
-
-        if end_dt < start_dt:
-            delta = start_dt - end_dt
-            negative = True
-        else:
-            delta = end_dt - start_dt
-            negative = False
-
-        total_seconds = int(delta.total_seconds())
-
-        if total_seconds < 3600:
-            minutes = total_seconds // 60
-            seconds = total_seconds % 60
-            formatted = f"{minutes:02d}:{seconds:02d}"
-        else:
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-        return f"-{formatted}" if negative else formatted
-
     @staticmethod
     def _convert_scroll_direction(scroll_data):
         """Convert scroll data to human-readable direction"""
@@ -139,7 +94,7 @@ class AggregatedLog:
             direction_str = "no scroll"
         return direction_str
 
-    def to_prompt(self, start_timestamp):
+    def to_prompt(self, frame, fps: int = 1):
         actions = []
         keys_pressed = []
 
@@ -175,21 +130,22 @@ class AggregatedLog:
                 cursor_pos = event.get('cursor_pos', 'unknown position')
                 actions.append(f"Mouse moved to {cursor_pos}.")
 
-        # Add any remaining keys that weren't followed by a mouse event
         if keys_pressed:
             actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
 
-        start_time_diff = self._mm_ss_difference(start_timestamp, self.start_timestamp)
-        end_time_diff = self._mm_ss_difference(start_timestamp, self.end_timestamp)
+        start_time_seconds = frame / fps
+        start_time_mm_ss = datetime.utcfromtimestamp(start_time_seconds).strftime('%M:%S')
+        end_time_seconds = (frame + 2) / fps
+        end_time_mm_ss = datetime.utcfromtimestamp(end_time_seconds).strftime('%M:%S')
 
         action_list = '\n'.join([f"  {action}" for action in actions])
 
         prompt = f"""
-{start_time_diff} - {end_time_diff} Events. Starting:
-Cursor position: {self.start_cursor_pos} to {self.end_cursor_pos if self.end_cursor_pos else 'N/A'}
-Actions:
-{action_list}
-"""
+        {start_time_mm_ss} - {end_time_mm_ss} Events. Starting:
+        Cursor position: {self.start_cursor_pos} to {self.end_cursor_pos if self.end_cursor_pos else 'N/A'}
+        Actions:
+        {action_list}
+        """
         return prompt
 
     def __repr__(self) -> str:

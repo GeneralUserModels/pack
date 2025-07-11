@@ -15,7 +15,7 @@ PERCENTILE = 95
 
 def setup_gemini_api(api_key):
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-1.5-pro')
+    return genai.GenerativeModel('gemini-2.5-pro')
 
 
 def upload_video_file(video_path):
@@ -40,8 +40,7 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
         with open(agg_json_path, "r") as f:
             logs = json.load(f)
         agg_logs = [AggregatedLog.from_dict(log) for log in logs]
-        start = agg_logs[0].start_timestamp
-        logs_prompt = [a.to_prompt(start) for a in agg_logs]
+        logs_prompt = [a.to_prompt(2 * i) for i, a in enumerate(agg_logs)]
 
         prompt_template = f"""
         I got this annotated video composed of a series of annotated screenshots, one each second. Thereby the screenshots have annotations baked into them:
@@ -82,12 +81,12 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
         ]
         """
 
-        model = setup_gemini_api(api_key)
-        video_file = upload_video_file(str(video_path))
-
         print("Generating content with Gemini...")
         print(f"Prompt: {prompt_template}")
+        model = setup_gemini_api(api_key)
+        video_file = upload_video_file(str(video_path))
         print(f"Video file: {video_file.uri}")
+
         response = model.generate_content([prompt_template, video_file])
         return response.text
 

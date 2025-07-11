@@ -404,7 +404,7 @@ def annotate_image(img: Image.Image, events, monitor, prev_end_cursor=None, bbox
         img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor, color, bbox)
 
     mouse_events = extract_mouse_events(events)
-    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS)
+    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS, bbox)
 
     if prev_end_cursor and events:
         first_cursor = events[0].get('cursor_pos', [])
