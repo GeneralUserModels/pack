@@ -1,0 +1,227 @@
+[
+  {
+    "start": "00:00",
+    "end": "00:04",
+    "task": "Searching for 'python operator' on Google and opening a Google Doc."
+  },
+  {
+    "start": "00:08",
+    "end": "00:11",
+    "task": "Browsing Google Docs templates."
+  },
+  {
+    "start": "00:12",
+    "end": "00:18",
+    "task": "Opening and reviewing a 'Meeting' document in Google Docs and then opening an 'Experiment' document."
+  },
+  {
+    "start": "00:18",
+    "end": "00:24",
+    "task": "Reading and scrolling through the 'Experiment' document."
+  },
+  {
+    "start": "00:25",
+    "end": "00:29",
+    "task": "Zooming in on the 'Experiment' document and continuing to scroll and review it."
+  },
+  {
+    "start": "00:32",
+    "end": "00:37",
+    "task": "Clicking and possibly editing a section of the 'Experiment' document, and scrolling."
+  },
+  {
+    "start": "00:38",
+    "end": "00:43",
+    "task": "Moving the cursor and scrolling within the 'Experiment' document and then navigating to the 'Experiment' section."
+  },
+  {
+    "start": "00:44",
+    "end": "00:52",
+    "task": "Navigating and scrolling within the 'Experiment' document."
+  },
+  {
+    "start": "00:52",
+    "end": "01:00",
+    "task": "Scrolling through the 'Experiment' document."
+  },
+  {
+    "start": "01:00",
+    "end": "01:02",
+    "task": "Clicking on a section of the 'Experiment' document."
+  },
+  {
+    "start": "01:03",
+    "end": "01:08",
+    "task": "Clicking and applying bold formatting to text in the document."
+  },
+  {
+    "start": "01:08",
+    "end": "01:10",
+    "task": "Clicking on different parts of the document."
+  },
+  {
+    "start": "01:10",
+    "end": "01:14",
+    "task": "Moving cursor around in the document."
+  },
+  {
+    "start": "01:14",
+    "end": "01:29",
+    "task": "Editing and formatting the text, including cutting, pasting and inserting characters in the 'Book Dataset Mixing vs Merging' document."
+  },
+  {
+    "start": "01:30",
+    "end": "01:36",
+    "task": "Opening and navigating to a Google Sheet named 'Top k by benchmark'."
+  },
+  {
+    "start": "01:37",
+    "end": "01:43",
+    "task": "Reviewing the contents of the Google Sheet."
+  },
+  {
+    "start": "01:43",
+    "end": "01:44",
+    "task": "Navigating to the 'val_points' sheet."
+  },
+  {
+    "start": "01:45",
+    "end": "01:46",
+    "task": "Scrolling and slightly moving the mouse in the 'val_points' sheet."
+  },
+  {
+    "start": "01:47",
+    "end": "01:52",
+    "task": "Clicking on the sheet and going back to the 'Top k by benchmark' sheet."
+  },
+  {
+    "start": "01:52",
+    "end": "01:54",
+    "task": "Scrolling in the spreadsheet."
+  },
+  {
+    "start": "01:54",
+    "end": "01:58",
+    "task": "Moving and clicking in the sheet."
+  },
+  {
+    "start": "01:59",
+    "end": "02:06",
+    "task": "Clicking and moving cursor on Google."
+  },
+  {
+    "start": "02:06",
+    "end": "02:11",
+    "task": "Opening Google Calendar and viewing schedule."
+  },
+  {
+    "start": "02:13",
+    "end": "02:16",
+    "task": "Adding a new calendar entry titled 'cal'."
+  },
+  {
+    "start": "02:17",
+    "end": "02:20",
+    "task": "Clicking on a calendar entry."
+  },
+  {
+    "start": "02:20",
+    "end": "02:29",
+    "task": "Creating a new calendar entry 'Book tickets'."
+  },
+  {
+    "start": "02:30",
+    "end": "02:40",
+    "task": "Adding a new calendar entry for 'Meeting Albert'."
+  },
+  {
+    "start": "02:41",
+    "end": "02:46",
+    "task": "Clicking and opening another Google Doc named 'Book benchmark'."
+  },
+  {
+    "start": "02:53",
+    "end": "02:56",
+    "task": "Writing the heading 'Book tickets'."
+  },
+  {
+    "start": "02:57",
+    "end": "03:01",
+    "task": "Clicking different parts of the document."
+  },
+  {
+    "start": "03:01",
+    "end": "03:06",
+    "task": "Clicking something in the document."
+  },
+  {
+    "start": "03:06",
+    "end": "03:10",
+    "task": "Scrolling and moving the cursor in the document."
+  },
+  {
+    "start": "03:11",
+    "end": "03:13",
+    "task": "Clicking and slightly moving cursor on Google."
+  },
+  {
+    "start": "03:14",
+    "end": "03:14",
+    "task": "Scrolling twice in the document."
+  },
+  {
+    "start": "03:15",
+    "end": "03:28",
+    "task": "Zooming out and scrolling in the document."
+  },
+  {
+    "start": "03:40",
+    "end": "03:41",
+    "task": "Scrolling up and down in the document."
+  },
+  {
+    "start": "03:42",
+    "end": "03:46",
+    "task": "Opening a new tab and clicking on a certain part in it."
+  },
+  {
+    "start": "03:48",
+    "end": "03:49",
+    "task": "Clicking on a link in the opened tab."
+  },
+  {
+    "start": "03:52",
+    "end": "04:06",
+    "task": "Zooming in and scrolling down in a document."
+  },
+  {
+    "start": "04:09",
+    "end": "04:09",
+    "task": "Moving cursor slightly in the document."
+  },
+  {
+    "start": "04:15",
+    "end": "04:16",
+    "task": "Scrolling down 5 times."
+  },
+  {
+    "start": "04:20",
+    "end": "04:22",
+    "task": "Moving cursor around and scrolling down."
+  },
+  {
+    "start": "04:23",
+    "end": "04:27",
+    "task": "Searching Google for 'lora soups'."
+  },
+  {
+    "start": "04:28",
+    "end": "04:29",
+    "task": "Scrolling down and clicking on a link."
+  },
+  {
+    "start": "04:29",
+    "end": "04:42",
+    "task": "Zooming in, scrolling and pressing keyboard keys."
+  }
+]

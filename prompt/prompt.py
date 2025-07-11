@@ -83,6 +83,9 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
         model = setup_gemini_api(api_key)
         video_file = upload_video_file(str(video_path))
 
+        print("Generating content with Gemini...")
+        print(f"Prompt: {prompt_template}")
+        print(f"Video file: {video_file.uri}")
         response = model.generate_content([prompt_template, video_file])
         return response.text
 

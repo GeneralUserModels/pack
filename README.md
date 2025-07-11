@@ -1,8 +1,8 @@
-# gum-end-to-end
+# Pack of GUM
 
 ## Setup
 
-- prerequisite: `python 3.11+` (`python3.13` recommended), [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- prerequisite: `python 3.11+` (`python3.12.7` recommended), [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```shell
 # setup once
