@@ -97,7 +97,7 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
 
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
-    VIDEO_PATH = Path(__file__).parent.parent / "logs" / "session_2025-07-11_04-03-47-306009" / f"agg_{PERCENTILE}_visualizations" / "event_logs_video.mp4"
+    VIDEO_PATH = Path(__file__).parent.parent / "logs" / "session_2025-07-11_04-03-47-306009" / f"agg_{PERCENTILE}_visualizations" / "event_logs_combined.mp4"
     AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'aggregated_logs_{PERCENTILE}.json'
 
     result = prompt_gemini_with_annotated_video(API_KEY, VIDEO_PATH, AGG_JSON)

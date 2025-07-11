@@ -67,6 +67,19 @@ class AggregatedLog:
             events=data.get("events", [])
         )
 
+    def _convert_pos_to_gemini_relative(self, pos):
+        if not self.monitor:
+            return pos
+        width = self.monitor.get('width', 1)
+        height = self.monitor.get('height', 1)
+        if isinstance(pos, tuple) and len(pos) == 2:
+            x, y = pos
+            x -= self.monitor.get('left', 0)
+            y -= self.monitor.get('top', 0)
+            relative_x = round(x / width, 2) * 1_000
+            relative_y = round(y / height, 2) * 1_000
+            return (relative_x, relative_y)
+
     @staticmethod
     def _convert_scroll_direction(scroll_data):
         """Convert scroll data to human-readable direction"""
@@ -113,7 +126,7 @@ class AggregatedLog:
                 button = event.get('details', {}).get('button', 'Button.unknown')
                 button = button.replace('Button.', '') if button.startswith('Button.') else button
                 cursor_pos = event.get('cursor_pos', 'unknown position')
-                actions.append(f"Mouse clicked {button} at {cursor_pos}.")
+                actions.append(f"Mouse clicked {button} at {self._convert_pos_to_gemini_relative(cursor_pos)}.")
 
             elif event_type == 'mouse_scroll':
                 if keys_pressed:
@@ -128,7 +141,7 @@ class AggregatedLog:
                     actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
                 cursor_pos = event.get('cursor_pos', 'unknown position')
-                actions.append(f"Mouse moved to {cursor_pos}.")
+                actions.append(f"Mouse moved to {self._convert_pos_to_gemini_relative(cursor_pos)}.")
 
         if keys_pressed:
             actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
@@ -142,7 +155,7 @@ class AggregatedLog:
 
         prompt = f"""
         {start_time_mm_ss} - {end_time_mm_ss} Events. Starting:
-        Cursor position: {self.start_cursor_pos} to {self.end_cursor_pos if self.end_cursor_pos else 'N/A'}
+        Cursor position: {self._convert_pos_to_gemini_relative(self.start_cursor_pos)} to {self._convert_pos_to_gemini_relative(self.end_cursor_pos) if self.end_cursor_pos else 'N/A'}
         Actions:
         {action_list}
         """
