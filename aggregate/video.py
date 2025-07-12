@@ -10,8 +10,10 @@ import argparse
 
 PERCENTILE = 95
 
-AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'aggregated_logs_{PERCENTILE}.json'
-OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'agg_{PERCENTILE}_visualizations'
+AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'aggregated_logs_{PERCENTILE}.json'
+OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'agg_{PERCENTILE}_visualizations'
+# AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'aggregated_logs_{PERCENTILE}.json'
+# OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'agg_{PERCENTILE}_visualizations'
 BORDER_WIDTH = 10
 CLICK_MARKER_RADIUS = 8
 
@@ -74,6 +76,42 @@ def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int) 
             fill=color, outline='black', width=2
         )
     return img
+
+
+def create_video_writer(output_path, fps, width, height):
+    """Create a video writer with the most compatible settings"""
+
+    # Try the most reliable codec combinations
+    attempts = [
+        # (filename, fourcc, description)
+        (output_path.with_suffix('.avi'), cv2.VideoWriter_fourcc(*'XVID'), 'AVI with XVID'),
+        (output_path.with_suffix('.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), 'MP4 with mp4v'),
+        (output_path.with_suffix('.mov'), cv2.VideoWriter_fourcc(*'mp4v'), 'MOV with mp4v'),
+        (output_path.with_suffix('.avi'), cv2.VideoWriter_fourcc(*'MJPG'), 'AVI with MJPG'),
+    ]
+
+    for file_path, fourcc, description in attempts:
+        print(f"Trying {description}...")
+
+        # Create video writer
+        video_writer = cv2.VideoWriter(str(file_path), fourcc, fps, (width, height))
+
+        if video_writer.isOpened():
+            # Test with a dummy frame
+            test_frame = np.zeros((height, width, 3), dtype=np.uint8)
+            try:
+                video_writer.write(test_frame)
+                print(f"Success! Using {description}")
+                video_writer.release()  # Close and reopen for clean start
+                return cv2.VideoWriter(str(file_path), fourcc, fps, (width, height)), file_path
+            except Exception as e:
+                print(f"Failed to write test frame: {e}")
+                video_writer.release()
+        else:
+            print(f"Could not open {description}")
+            video_writer.release()
+
+    return None, None
 
 
 def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='orange', label=None) -> Image.Image:
@@ -459,27 +497,17 @@ def convert_to_single_video_with_transitions(logs, output_name, should_annotate=
 
         fps = 1.0 / seconds_per_frame
 
+        # Fix: Use proper file extension based on format
         output_filename = f"{output_name}_combined.{video_format}"
         output_path = OUTPUT_DIR / output_filename
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        if video_format.lower() == 'mp4':
-            fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        elif video_format.lower() == 'avi':
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        elif video_format.lower() == 'mov':
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        elif video_format.lower() == 'webm':
-            fourcc = cv2.VideoWriter_fourcc(*'VP80')
-        else:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer, final_output_path = create_video_writer(output_path, fps, max_width, max_height)
+        if video_writer is None:
+            print("Error: Could not create video writer with any format")
+            return None
 
-        video_writer = cv2.VideoWriter(str(output_path), fourcc, fps, (max_width, max_height))
-
-        if not video_writer.isOpened():
-            print("Error: Could not open video writer. Trying alternative codec...")
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            video_writer = cv2.VideoWriter(str(output_path), fourcc, fps, (max_width, max_height))
+        output_path = final_output_path
 
         try:
             for i, (frame_path, frame_width, frame_height) in enumerate(frame_paths):
@@ -500,8 +528,12 @@ def convert_to_single_video_with_transitions(logs, output_name, should_annotate=
         finally:
             video_writer.release()
 
-        print(f"Video saved to: {output_path}")
-        print(f"Video specs: {max_width}x{max_height}, {fps:.2f} FPS, {len(frame_paths)} frames")
+        if output_path.exists() and output_path.stat().st_size > 0:
+            print(f"Video saved to: {output_path}")
+            print(f"Video specs: {max_width}x{max_height}, {fps:.2f} FPS, {len(frame_paths)} frames")
+            print(f"File size: {output_path.stat().st_size / (1024 * 1024):.1f} MB")
+        else:
+            print(f"Error: Video file was not created or is empty: {output_path}")
 
         return output_path
 

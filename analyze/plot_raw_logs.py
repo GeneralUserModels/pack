@@ -241,5 +241,6 @@ def plot_interactive(events_path: Path):
 
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
+    # path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-03_01-04-03-001589' / 'events.jsonl'
     plot_interactive(path)

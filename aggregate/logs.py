@@ -186,7 +186,9 @@ def main(path, percentile=95):
 
 
 if __name__ == '__main__':
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
+    # path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-03_01-04-03-001589' / 'events.jsonl'
+
     aggregated_logs = main(path, PERCENTILE)
     with open(path.parent / f'aggregated_logs_{PERCENTILE}.json', 'w') as f:
         json.dump([log.to_dict() for log in aggregated_logs], f, indent=4, ensure_ascii=False)

@@ -76,8 +76,8 @@ class AggregatedLog:
             x, y = pos
             x -= self.monitor.get('left', 0)
             y -= self.monitor.get('top', 0)
-            relative_x = round(x / width, 2) * 1_000
-            relative_y = round(y / height, 2) * 1_000
+            relative_x = round((x / width) * 1_000)
+            relative_y = round((y / height) * 1_000)
             return (relative_x, relative_y)
 
     @staticmethod
