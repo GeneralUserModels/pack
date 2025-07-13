@@ -7,7 +7,7 @@ from modules import AggregatedLog, RawLogEvents
 
 PERCENTILE = 95
 
-MAX_RELEASE_EVENT_DURATION = 1 # seconds, used to filter out noise in keyboard events
+MAX_RELEASE_EVENT_DURATION = 1  # seconds, used to filter out noise in keyboard events
 MOUSE_DOWN_DEBOUNCE = 500  # milliseconds
 MOUSE_DOWN_POS_OFFSET = 0.01  # % of screen height, width
 
@@ -126,11 +126,10 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
 
     for edge in edges:
         for rel_idx, event in enumerate(events[start_idx:], start=start_idx):
-            if event.event_type == "poll":
-                continue
             ev_time = datetime.strptime(event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()
+            next_ev_time = datetime.strptime(events[rel_idx + 1].timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() if rel_idx + 1 < len(events) else float('inf')
             switched_screen = json.dumps(event.monitor) != json.dumps(events[start_idx].monitor)
-            if ev_time == edge:
+            if ev_time <= edge and next_ev_time > edge:
                 cut_idx = rel_idx
                 break
             if switched_screen:
@@ -178,16 +177,18 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
 
 
 def main(path, percentile=95):
-    logs = RawLogEvents().load(path)
+    logs = RawLogEvents().load(path / 'events.jsonl')
     logs.sort()
+    debounced_logs = RawLogEvents()
+    debounced_logs.events = [log for log in logs if log.screenshot_path]
     logs.events = [log for log in logs if log.event_type != 'poll']
     timestamps, breaks, durations, thresholds = calculate_breaks(logs, percentile)
-    return aggregate_logs(logs, breaks)
+    print(breaks)
+    return aggregate_logs(debounced_logs, breaks)
 
 
 if __name__ == '__main__':
-    # path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
-    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-03_01-04-03-001589' / 'events.jsonl'
+    path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-13_15-59-04-565176'
 
     aggregated_logs = main(path, PERCENTILE)
     with open(path.parent / f'aggregated_logs_{PERCENTILE}.json', 'w') as f:

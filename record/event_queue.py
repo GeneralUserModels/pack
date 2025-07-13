@@ -7,8 +7,9 @@ from modules import RawLog
 
 class EventQueue:
 
-    def __init__(self, maxsize=1024):
+    def __init__(self, maxsize=1024, debouncing_thresholds=None):
         self.queue = Queue(maxsize=maxsize)
+        self.debouncing_thresholds = debouncing_thresholds
 
     def enqueue(
         self,

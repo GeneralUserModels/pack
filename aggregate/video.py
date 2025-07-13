@@ -8,12 +8,6 @@ import cv2
 import tempfile
 import argparse
 
-PERCENTILE = 95
-
-AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'aggregated_logs_{PERCENTILE}.json'
-OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-03_01-04-03-001589' / f'agg_{PERCENTILE}_visualizations'
-# AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'aggregated_logs_{PERCENTILE}.json'
-# OUTPUT_DIR = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'agg_{PERCENTILE}_visualizations'
 BORDER_WIDTH = 10
 CLICK_MARKER_RADIUS = 8
 
@@ -38,16 +32,66 @@ EVENT_COLORS = {
 }
 
 
-def screen_to_image_coords(screen_pos, monitor):
-    """Convert screen coordinates to image coordinates"""
+def get_max_dimensions_from_logs(logs):
+    max_width = 0
+    max_height = 0
+
+    for log in logs:
+        start_path = Path(log.start_screenshot_path)
+        if start_path.exists():
+            try:
+                with Image.open(start_path) as img:
+                    max_width = max(max_width, img.width)
+                    max_height = max(max_height, img.height)
+            except Exception as e:
+                print(f"Warning: Could not read {start_path}: {e}")
+
+        end_path = Path(log.end_screenshot_path)
+        if end_path.exists():
+            try:
+                with Image.open(end_path) as img:
+                    max_width = max(max_width, img.width)
+                    max_height = max(max_height, img.height)
+            except Exception as e:
+                print(f"Warning: Could not read {end_path}: {e}")
+
+    return max_width, max_height
+
+
+def scale_and_pad_image(img, target_width, target_height, background_color=(0, 0, 0)):
+    original_width, original_height = img.size
+
+    scale_x = target_width / original_width
+    scale_y = target_height / original_height
+    scale = min(scale_x, scale_y)
+
+    new_width = int(original_width * scale)
+    new_height = int(original_height * scale)
+
+    scaled_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    result = Image.new('RGB', (target_width, target_height), background_color)
+
+    x_offset = (target_width - new_width) // 2
+    y_offset = (target_height - new_height) // 2
+
+    result.paste(scaled_img, (x_offset, y_offset))
+
+    return result, scale, x_offset, y_offset
+
+
+def screen_to_scaled_coords(screen_pos, monitor, scale, x_offset, y_offset):
     x, y = screen_pos
     img_x = x - monitor['left']
     img_y = y - monitor['top']
-    return img_x, img_y
+
+    scaled_x = int(img_x * scale) + x_offset
+    scaled_y = int(img_y * scale) + y_offset
+
+    return scaled_x, scaled_y
 
 
 def draw_border(img: Image.Image, color: str, width: int) -> Image.Image:
-    """Draw a colored border around the image"""
     draw = ImageDraw.Draw(img)
     w, h = img.size
     for i in range(width):
@@ -56,70 +100,34 @@ def draw_border(img: Image.Image, color: str, width: int) -> Image.Image:
     return img
 
 
-def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int) -> Image.Image:
-    """Draw click markers on the image"""
+def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int, scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
     draw = ImageDraw.Draw(img)
     for click in click_positions:
         button = click.get('button', 'Button.left')
         position = click.get('position', click)
 
-        img_x, img_y = screen_to_image_coords(position, monitor)
+        img_x, img_y = screen_to_scaled_coords(position, monitor, scale, x_offset, y_offset)
 
         if img_x < 0 or img_y < 0 or img_x >= img.width or img_y >= img.height:
             continue
 
         color = BUTTON_COLORS.get(button, 'yellow')
 
+        scaled_radius = int(marker_radius * scale)
+
         draw.ellipse(
-            [(img_x - marker_radius, img_y - marker_radius),
-             (img_x + marker_radius, img_y + marker_radius)],
+            [(img_x - scaled_radius, img_y - scaled_radius),
+             (img_x + scaled_radius, img_y + scaled_radius)],
             fill=color, outline='black', width=2
         )
     return img
 
 
-def create_video_writer(output_path, fps, width, height):
-    """Create a video writer with the most compatible settings"""
-
-    # Try the most reliable codec combinations
-    attempts = [
-        # (filename, fourcc, description)
-        (output_path.with_suffix('.avi'), cv2.VideoWriter_fourcc(*'XVID'), 'AVI with XVID'),
-        (output_path.with_suffix('.mp4'), cv2.VideoWriter_fourcc(*'mp4v'), 'MP4 with mp4v'),
-        (output_path.with_suffix('.mov'), cv2.VideoWriter_fourcc(*'mp4v'), 'MOV with mp4v'),
-        (output_path.with_suffix('.avi'), cv2.VideoWriter_fourcc(*'MJPG'), 'AVI with MJPG'),
-    ]
-
-    for file_path, fourcc, description in attempts:
-        print(f"Trying {description}...")
-
-        # Create video writer
-        video_writer = cv2.VideoWriter(str(file_path), fourcc, fps, (width, height))
-
-        if video_writer.isOpened():
-            # Test with a dummy frame
-            test_frame = np.zeros((height, width, 3), dtype=np.uint8)
-            try:
-                video_writer.write(test_frame)
-                print(f"Success! Using {description}")
-                video_writer.release()  # Close and reopen for clean start
-                return cv2.VideoWriter(str(file_path), fourcc, fps, (width, height)), file_path
-            except Exception as e:
-                print(f"Failed to write test frame: {e}")
-                video_writer.release()
-        else:
-            print(f"Could not open {description}")
-            video_writer.release()
-
-    return None, None
-
-
-def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='orange', label=None) -> Image.Image:
-    """Draw an arrow showing cursor movement"""
+def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='orange', label=None, scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
     draw = ImageDraw.Draw(img)
 
-    start_x, start_y = screen_to_image_coords(start_pos, monitor)
-    end_x, end_y = screen_to_image_coords(end_pos, monitor)
+    start_x, start_y = screen_to_scaled_coords(start_pos, monitor, scale, x_offset, y_offset)
+    end_x, end_y = screen_to_scaled_coords(end_pos, monitor, scale, x_offset, y_offset)
 
     if (start_x < 0 or start_y < 0 or start_x >= img.width or start_y >= img.height or
             end_x < 0 or end_y < 0 or end_x >= img.width or end_y >= img.height):
@@ -128,9 +136,10 @@ def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='oran
     if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
         return img
 
-    draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=3)
+    line_width = max(1, int(3 * scale))
+    draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=line_width)
 
-    arrow_length = 15
+    arrow_length = int(15 * scale)
     arrow_angle = 25
 
     dx = end_x - start_x
@@ -145,14 +154,14 @@ def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='oran
 
     draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill=color, outline='darkorange')
 
-    draw.ellipse([(start_x - 4, start_y - 4), (start_x + 4, start_y + 4)],
+    marker_size = int(4 * scale)
+    draw.ellipse([(start_x - marker_size, start_y - marker_size), (start_x + marker_size, start_y + marker_size)],
                  fill='lime', outline='darkgreen', width=2)
 
     return img
 
 
 def extract_mouse_events(events):
-    """Extract mouse click events from the events list"""
     mouse_events = []
     for event in events:
         event_type = event.get('event_type', '')
@@ -171,7 +180,6 @@ def extract_mouse_events(events):
 
 
 def get_cursor_movements(events):
-    """Extract cursor movement trajectories from events"""
     movements = []
     prev_pos = None
 
@@ -192,17 +200,16 @@ def get_cursor_movements(events):
 
 
 def format_event_info(log: dict):
-    """Format event information for display"""
     info_lines = []
 
-    keyboard_events = [e for e in log.get('events', []) if e.get('event_type', '').startswith('keyboard')]
+    keyboard_events = [e for e in log.events if e.get('event_type', '').startswith('keyboard')]
     if keyboard_events:
         keys = [e.get('details', {}).get('key', 'unknown') for e in keyboard_events]
         info_lines.append(f"Keys: {', '.join(keys)}")
     else:
         info_lines.append("Keys: <none>")
 
-    mouse_events = extract_mouse_events(log.get('events', []))
+    mouse_events = extract_mouse_events(log.events)
     if mouse_events:
         info_lines.append("Mouse Events:")
         for i, event in enumerate(mouse_events, 1):
@@ -213,27 +220,26 @@ def format_event_info(log: dict):
     else:
         info_lines.append("Mouse Events: <none>")
 
-    start_pos = log.get('start_cursor_pos', [])
-    end_pos = log.get('end_cursor_pos', [])
+    start_pos = log.start_cursor_pos
+    end_pos = log.end_cursor_pos
     if start_pos and end_pos:
         info_lines.append(f"Cursor: {start_pos} → {end_pos}")
 
-    scroll_events = [e for e in log.get('events', []) if e.get('event_type') == 'scroll']
+    scroll_events = [e for e in log.events if e.get('event_type') == 'scroll']
     if scroll_events:
         info_lines.append(f"Scrolls: {len(scroll_events)}")
 
-    start_time = log.get('start_timestamp', '')
-    end_time = log.get('end_timestamp', '')
+    start_time = log.start_timestamp
+    end_time = log.end_timestamp
     if start_time and end_time:
         info_lines.append(f"Duration: {start_time} → {end_time}")
 
     return '\n'.join(info_lines)
 
 
-def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None):
-    """Create visualization for a single log entry"""
-    start_path = Path(log['start_screenshot_path'])
-    end_path = Path(log['end_screenshot_path'])
+def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None, target_width=None, target_height=None):
+    start_path = Path(log.start_screenshot_path)
+    end_path = Path(log.end_screenshot_path)
 
     if not start_path.exists() or not end_path.exists():
         print(f"Warning: Screenshot files not found for log {index + 1}")
@@ -242,10 +248,17 @@ def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None):
     img_start = Image.open(start_path).convert('RGB')
     img_end = Image.open(end_path).convert('RGB')
 
-    monitor = log.get('monitor', {})
-    events = log.get('events', [])
+    if target_width and target_height:
+        img_start, start_scale, start_x_offset, start_y_offset = scale_and_pad_image(img_start, target_width, target_height)
+        img_end, end_scale, end_x_offset, end_y_offset = scale_and_pad_image(img_end, target_width, target_height)
+    else:
+        start_scale = 1.0
+        start_x_offset = start_y_offset = 0
 
-    img_start = annotate_image(img_start, events, monitor, prev_end_cursor)
+    monitor = log.monitor
+    events = log.events
+
+    img_start = annotate_image(img_start, events, monitor, prev_end_cursor, start_scale, start_x_offset, start_y_offset)
 
     img_start = draw_border(img_start, color='blue', width=BORDER_WIDTH)
     img_end = draw_border(img_end, color='red', width=BORDER_WIDTH)
@@ -273,10 +286,10 @@ def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None):
     legend_elements = []
     mouse_events = extract_mouse_events(events)
     for button, color in BUTTON_COLORS.items():
-        if any(event.get('button') == button for event in mouse_events):
+        if any(event.button == button for event in mouse_events):
             legend_elements.append(patches.Patch(color=color, label=button))
 
-    if any(e.get('cursor_pos') for e in events):
+    if any(e.get("cursor_pos", "unknown") for e in events):
         legend_elements.append(patches.Patch(color='orange', label='Cursor movement'))
         legend_elements.append(patches.Patch(color='lime', label='Start position'))
         if prev_end_cursor:
@@ -292,149 +305,10 @@ def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None):
     print(f"Saved visualization: {out_path}")
 
 
-def get_screen_dimensions(log):
-    """Get the screen dimensions for a single log"""
-    monitor = log.get('monitor', {})
-
-    for screenshot_key in ['start_screenshot_path', 'end_screenshot_path']:
-        screenshot_path = Path(log[screenshot_key])
-        if screenshot_path.exists():
-            img = Image.open(screenshot_path)
-            width, height = img.size
-            return width, height
-
-    if monitor:
-        width = monitor.get('width', 1920)
-        height = monitor.get('height', 1080)
-        return width, height
-
-    return 1920, 1080
-
-
-def group_logs_by_screen_size(logs):
-    """Group logs by their screen dimensions"""
-    groups = {}
-
-    for i, log in enumerate(logs):
-        width, height = get_screen_dimensions(log)
-        key = f"{width}x{height}"
-
-        if key not in groups:
-            groups[key] = []
-
-        groups[key].append((i, log))
-
-    return groups
-
-
-def convert_to_separate_videos(logs, output_name, should_annotate=True, seconds_per_frame=1, video_format='mp4'):
-    """Convert event logs to separate video files for each screen size"""
-
-    screen_groups = group_logs_by_screen_size(logs)
-
-    print(f"Found {len(screen_groups)} different screen sizes:")
-    for size, group_logs in screen_groups.items():
-        print(f"  {size}: {len(group_logs)} logs")
-
-    output_paths = []
-
-    for screen_size, group_logs in screen_groups.items():
-        print(f"\nProcessing screen size: {screen_size}")
-
-        width, height = map(int, screen_size.split('x'))
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            frame_paths = []
-
-            prev_end_cursor = None
-
-            for group_idx, (original_idx, log) in enumerate(group_logs):
-                monitor = log.get('monitor', {})
-                events = log.get('events', [])
-
-                print(f"Processing log {group_idx + 1}/{len(group_logs)} (original index: {original_idx})")
-
-                start_path = Path(log['start_screenshot_path'])
-                if start_path.exists():
-                    img_start = Image.open(start_path).convert('RGB')
-
-                    if should_annotate:
-                        img_start = annotate_image(img_start, events, monitor, prev_end_cursor)
-
-                    start_frame_path = temp_path / f"frame_{group_idx * 2:06d}_start.png"
-                    img_start.save(start_frame_path)
-                    frame_paths.append(start_frame_path)
-
-                end_path = Path(log['end_screenshot_path'])
-                if end_path.exists():
-                    img_end = Image.open(end_path).convert('RGB')
-
-                    if should_annotate and group_idx < len(group_logs) - 1:
-                        next_log = group_logs[group_idx + 1][1]
-                        next_start_cursor = next_log.get('start_cursor_pos', [])
-                        current_end_cursor = log.get('end_cursor_pos', [])
-
-                        if (next_start_cursor and current_end_cursor and
-                                next_start_cursor != current_end_cursor):
-                            img_end = draw_cursor_arrow(img_end, current_end_cursor, next_start_cursor, monitor, 'magenta')
-
-                    end_frame_path = temp_path / f"frame_{group_idx * 2 + 1:06d}_end.png"
-                    img_end.save(end_frame_path)
-                    frame_paths.append(end_frame_path)
-
-                prev_end_cursor = log.get('end_cursor_pos', [])
-
-            if not frame_paths:
-                print(f"No frames to process for screen size {screen_size}")
-                continue
-
-            fps = 1.0 / seconds_per_frame
-
-            output_filename = f"{output_name}_{screen_size}.{video_format}"
-            output_path = OUTPUT_DIR / output_filename
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-            if video_format.lower() == 'mp4':
-                fourcc = cv2.VideoWriter_fourcc(*'avc1')
-            elif video_format.lower() == 'avi':
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            elif video_format.lower() == 'mov':
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            elif video_format.lower() == 'webm':
-                fourcc = cv2.VideoWriter_fourcc(*'VP80')
-            else:
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-            video_writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-
-            if not video_writer.isOpened():
-                print(f"Error: Could not open video writer for {screen_size}. Trying alternative codec...")
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                video_writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-
-            try:
-                for i, frame_path in enumerate(frame_paths):
-                    img = Image.open(frame_path).convert('RGB')
-                    img_array = np.array(img)
-                    img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                    video_writer.write(img_bgr)
-
-                    if i % 50 == 0:
-                        print(f"Processed {i + 1}/{len(frame_paths)} frames")
-
-            finally:
-                video_writer.release()
-
-            print(f"Video saved to: {output_path}")
-            print(f"Video specs: {width}x{height}, {fps:.2f} FPS, {len(frame_paths)} frames")
-            output_paths.append(output_path)
-
-    return output_paths
-
-
-def convert_to_single_video_with_transitions(logs, output_name, should_annotate=True, seconds_per_frame=1, video_format='mp4'):
-    """Convert event logs to a single video with smooth transitions between different screen sizes"""
+def convert_to_video(logs, video_name, video_dir, should_annotate=True, seconds_per_frame=1):
+    print("Finding maximum dimensions from all screenshots...")
+    max_width, max_height = get_max_dimensions_from_logs(logs)
+    print(f"Maximum dimensions: {max_width}x{max_height}")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -443,82 +317,69 @@ def convert_to_single_video_with_transitions(logs, output_name, should_annotate=
         prev_end_cursor = None
 
         for i, log in enumerate(logs):
-            monitor = log.get('monitor', {})
-            events = log.get('events', [])
+            monitor = log.monitor
+            events = log.events
 
             print(f"Processing log {i + 1}/{len(logs)}")
 
-            width, height = get_screen_dimensions(log)
-
-            start_path = Path(log['start_screenshot_path'])
+            start_path = Path(log.start_screenshot_path)
             if start_path.exists():
                 img_start = Image.open(start_path).convert('RGB')
+                img_start, start_scale, start_x_offset, start_y_offset = scale_and_pad_image(img_start, max_width, max_height)
 
                 if should_annotate:
-                    img_start = annotate_image(img_start, events, monitor, prev_end_cursor)
+                    img_start = annotate_image(img_start, events, monitor, prev_end_cursor, start_scale, start_x_offset, start_y_offset)
+            else:
+                img_start = Image.new('RGB', (max_width, max_height), (0, 0, 0))
+                start_scale, start_x_offset, start_y_offset = 1.0, 0, 0
 
-                draw = ImageDraw.Draw(img_start)
-                resolution_text = f"{width}x{height}"
-                draw.text((10, 10), resolution_text, fill='white', stroke_width=2, stroke_fill='black')
+            start_frame_path = temp_path / f"frame_{i * 2:06d}_start.png"
+            img_start.save(start_frame_path)
+            frame_paths.append(start_frame_path)
 
-                start_frame_path = temp_path / f"frame_{i * 2:06d}_start.png"
-                img_start.save(start_frame_path)
-                frame_paths.append((start_frame_path, width, height))
-
-            end_path = Path(log['end_screenshot_path'])
+            end_path = Path(log.end_screenshot_path)
             if end_path.exists():
                 img_end = Image.open(end_path).convert('RGB')
+                img_end, end_scale, end_x_offset, end_y_offset = scale_and_pad_image(img_end, max_width, max_height)
 
                 if should_annotate and i < len(logs) - 1:
                     next_log = logs[i + 1]
-                    next_start_cursor = next_log.get('start_cursor_pos', [])
-                    current_end_cursor = log.get('end_cursor_pos', [])
+                    next_start_cursor = next_log.start_cursor_pos
+                    current_end_cursor = log.end_cursor_pos
 
                     if (next_start_cursor and current_end_cursor and
                             next_start_cursor != current_end_cursor):
-                        img_end = draw_cursor_arrow(img_end, current_end_cursor, next_start_cursor, monitor, 'magenta')
+                        img_end = draw_cursor_arrow(img_end, current_end_cursor, next_start_cursor, monitor, 'magenta', None, end_scale, end_x_offset, end_y_offset)
+            else:
+                img_end = Image.new('RGB', (max_width, max_height), (0, 0, 0))
 
-                draw = ImageDraw.Draw(img_end)
-                resolution_text = f"{width}x{height}"
-                draw.text((10, 10), resolution_text, fill='white', stroke_width=2, stroke_fill='black')
+            end_frame_path = temp_path / f"frame_{i * 2 + 1:06d}_end.png"
+            img_end.save(end_frame_path)
+            frame_paths.append(end_frame_path)
 
-                end_frame_path = temp_path / f"frame_{i * 2 + 1:06d}_end.png"
-                img_end.save(end_frame_path)
-                frame_paths.append((end_frame_path, width, height))
-
-            prev_end_cursor = log.get('end_cursor_pos', [])
+            prev_end_cursor = log.end_cursor_pos
 
         if not frame_paths:
             print("No frames to process")
             return
 
-        max_width = max(w for _, w, h in frame_paths)
-        max_height = max(h for _, w, h in frame_paths)
-
         fps = 1.0 / seconds_per_frame
 
-        # Fix: Use proper file extension based on format
-        output_filename = f"{output_name}_combined.{video_format}"
-        output_path = OUTPUT_DIR / output_filename
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = video_dir / f"{video_name}.mp4"
 
-        video_writer, final_output_path = create_video_writer(output_path, fps, max_width, max_height)
-        if video_writer is None:
-            print("Error: Could not create video writer with any format")
-            return None
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        video_writer = cv2.VideoWriter(str(video_path), fourcc, fps, (max_width, max_height))
 
-        output_path = final_output_path
+        if not video_writer.isOpened():
+            print("Error: Could not open video writer. Trying alternative codec...")
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            video_writer = cv2.VideoWriter(str(video_path), fourcc, fps, (max_width, max_height))
 
         try:
-            for i, (frame_path, frame_width, frame_height) in enumerate(frame_paths):
+            for i, frame_path in enumerate(frame_paths):
                 img = Image.open(frame_path).convert('RGB')
-
-                canvas = Image.new('RGB', (max_width, max_height), 'black')
-                x_offset = (max_width - frame_width) // 2
-                y_offset = (max_height - frame_height) // 2
-                canvas.paste(img, (x_offset, y_offset))
-
-                img_array = np.array(canvas)
+                img_array = np.array(img)
                 img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
                 video_writer.write(img_bgr)
 
@@ -528,45 +389,45 @@ def convert_to_single_video_with_transitions(logs, output_name, should_annotate=
         finally:
             video_writer.release()
 
-        if output_path.exists() and output_path.stat().st_size > 0:
-            print(f"Video saved to: {output_path}")
-            print(f"Video specs: {max_width}x{max_height}, {fps:.2f} FPS, {len(frame_paths)} frames")
-            print(f"File size: {output_path.stat().st_size / (1024 * 1024):.1f} MB")
-        else:
-            print(f"Error: Video file was not created or is empty: {output_path}")
-
-        return output_path
+        print(f"Video saved to: {video_path}")
+        print(f"Video specs: {max_width}x{max_height}, {fps:.2f} FPS, {len(frame_paths)} frames")
 
 
-def annotate_image(img: Image.Image, events, monitor, prev_end_cursor=None):
-    """Annotate image with cursor movements and mouse events"""
+def annotate_image(img: Image.Image, events, monitor, prev_end_cursor=None, scale=1.0, x_offset=0, y_offset=0):
     movements = get_cursor_movements(events)
     for movement in movements:
         color = EVENT_COLORS.get(movement['event_type'], 'orange')
-        img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor, color)
+        img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor, color, None, scale, x_offset, y_offset)
 
     mouse_events = extract_mouse_events(events)
-    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS)
+    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS, scale, x_offset, y_offset)
 
     if prev_end_cursor and events:
         first_cursor = events[0].get('cursor_pos', [])
         if first_cursor and first_cursor != prev_end_cursor:
-            img = draw_cursor_arrow(img, prev_end_cursor, first_cursor, monitor, 'magenta')
+            img = draw_cursor_arrow(img, prev_end_cursor, first_cursor, monitor, 'magenta', None, scale, x_offset, y_offset)
 
     return img
 
 
+def render_images(logs, output_dir):
+    max_width, max_height = get_max_dimensions_from_logs(logs)
+    print(f"Using maximum dimensions: {max_width}x{max_height}")
+
+    prev_end_cursor = None
+    for idx, log in enumerate(logs):
+        visualize_log(log, idx, output_dir, prev_end_cursor, max_width, max_height)
+        prev_end_cursor = log.end_cursor_pos
+
+
 def main():
     parser = argparse.ArgumentParser(description='Process event logs and create visualizations')
-    parser.add_argument('--mode', choices=['video', 'video-separate', 'video-combined', 'analysis'],
-                        default='analysis',
-                        help='Mode: video-separate (one video per screen size), video-combined (single video with transitions), video (legacy), or analysis')
+    parser.add_argument('--mode', choices=['video', 'analysis'], default='analysis',
+                        help='Mode: video or analysis (default: analysis)')
     parser.add_argument('--annotate', action='store_true', default=True,
                         help='Whether to annotate images with cursor movements and clicks')
     parser.add_argument('--seconds-per-frame', type=float, default=1.0,
                         help='Seconds per frame for video mode (default: 1.0)')
-    parser.add_argument('--video-format', choices=['mp4', 'avi', 'mov', 'webm'], default='mp4v',
-                        help='Video format (default: mp4)')
     parser.add_argument('--input-json', type=str, default=None,
                         help='Path to input JSON file (overrides default)')
     parser.add_argument('--output-dir', type=str, default=None,
@@ -582,26 +443,22 @@ def main():
         return
 
     logs = json.loads(input_json.read_text())
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Processing {len(logs)} logs in {args.mode} mode")
     print(f"Annotation: {'enabled' if args.annotate else 'disabled'}")
-    print(f"Video format: {args.video_format}")
 
-    if args.mode == 'video-separate':
-        output_paths = convert_to_separate_videos(logs, "event_logs", args.annotate, args.seconds_per_frame, args.video_format)
-        print(f"\nCreated {len(output_paths)} video files:")
-        for path in output_paths:
-            print(f"  {path}")
-    elif args.mode == 'video-combined':
-        output_path = convert_to_single_video_with_transitions(logs, "event_logs", args.annotate, args.seconds_per_frame, args.video_format)
-        print(f"\nCreated combined video: {output_path}")
+    if args.mode == 'video':
+        convert_to_video(logs, "event_logs_video", OUTPUT_DIR, args.annotate, args.seconds_per_frame)
     else:
-        prev_end_cursor = None
-        for idx, log in enumerate(logs):
-            visualize_log(log, idx, output_dir, prev_end_cursor)
-            prev_end_cursor = log.get('end_cursor_pos', [])
+        render_images(logs, output_dir)
 
 
 if __name__ == '__main__':
+
+    PERCENTILE = 95
+
+    SESSION = 'session_2025-07-13_15-59-04-565176'
+    AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
+    OUTPUT_DIR = Path(__file__).parent.parent / "logs" / SESSION / f'agg_{PERCENTILE}_visualizations'
     main()
