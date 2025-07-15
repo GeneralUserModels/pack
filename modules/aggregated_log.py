@@ -127,7 +127,10 @@ class AggregatedLog:
                 button = event.get('details', {}).get('button', 'Button.unknown')
                 button = button.replace('Button.', '') if button and button.startswith('Button.') else button
                 cursor_pos = event.get('cursor_pos', 'unknown position')
-                actions.append(f"Mouse clicked {button} at {self._convert_pos_to_gemini_relative(cursor_pos)}.")
+                double_click = event.get('details', {}).get('double_click', False)
+                mouse_str = f"Mouse clicked {button} at {self._convert_pos_to_gemini_relative(cursor_pos)}"
+                mouse_str += " (double click)" if double_click else ""
+                actions.append(mouse_str)
 
             elif event_type == 'mouse_scroll':
                 if keys_pressed:
@@ -142,7 +145,7 @@ class AggregatedLog:
                     actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
                 cursor_pos = event.get('cursor_pos', 'unknown position')
-                actions.append(f"Mouse moved to {self._convert_pos_to_gemini_relative(cursor_pos)}.")
+                actions.append(f"Mouse moved to {self._convert_pos_to_gemini_relative(cursor_pos)}")
 
         if keys_pressed:
             actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
