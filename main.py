@@ -6,7 +6,7 @@ from analyze.plot_raw_logs import plot_interactive
 
 
 def main():
-    SESSION = 'session_2025-07-13_17-09-59-136228'
+    SESSION = 'session_2025-07-14_20-15-27-182853'
     PERCENTILE = 95
     session_path = Path(__file__).parent / 'logs' / SESSION
 
@@ -16,7 +16,7 @@ def main():
 
     plot_interactive(session_path / 'events.jsonl')
 
-    # convert_to_video(aggregated_logs, "event_logs_video", session_path, should_annotate=True, seconds_per_frame=1)
+    convert_to_video(aggregated_logs, "event_logs_video", session_path, should_annotate=True, seconds_per_frame=1)
     visualization_path = session_path / f"agg_{PERCENTILE}_visualizations"
 
     visualization_path.mkdir(parents=True, exist_ok=True)

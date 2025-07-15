@@ -72,7 +72,7 @@ class AggregatedLog:
             return pos
         width = self.monitor.get('width', 1)
         height = self.monitor.get('height', 1)
-        if isinstance(pos, tuple) and len(pos) == 2:
+        if isinstance(pos, tuple) or isinstance(pos, list) and len(pos) == 2:
             x, y = pos
             x -= self.monitor.get('left', 0)
             y -= self.monitor.get('top', 0)
@@ -116,21 +116,22 @@ class AggregatedLog:
 
             if event_type == 'keyboard_press':
                 key = event.get('details', {}).get('key', 'Key.unknown')
-                key = key.replace("Key.", "") if key.startswith("Key.") else key
-                keys_pressed.append(key)
+                key = key.replace("Key.", "") if key and key.startswith("Key.") else key
+                if key:
+                    keys_pressed.append(key)
 
             elif event_type == 'mouse_down':
                 if keys_pressed:
                     actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
                 button = event.get('details', {}).get('button', 'Button.unknown')
-                button = button.replace('Button.', '') if button.startswith('Button.') else button
+                button = button.replace('Button.', '') if button and button.startswith('Button.') else button
                 cursor_pos = event.get('cursor_pos', 'unknown position')
                 actions.append(f"Mouse clicked {button} at {self._convert_pos_to_gemini_relative(cursor_pos)}.")
 
             elif event_type == 'mouse_scroll':
                 if keys_pressed:
-                    actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
                 scroll_data = event.get('details', {}).get('scroll', {})
                 direction = self._convert_scroll_direction(scroll_data)
@@ -138,26 +139,28 @@ class AggregatedLog:
 
             elif event_type == 'mouse_move':
                 if keys_pressed:
-                    actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
                 cursor_pos = event.get('cursor_pos', 'unknown position')
                 actions.append(f"Mouse moved to {self._convert_pos_to_gemini_relative(cursor_pos)}.")
 
         if keys_pressed:
-            actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
+            actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
 
         start_time_seconds = frame / fps
         start_time_mm_ss = datetime.utcfromtimestamp(start_time_seconds).strftime('%M:%S')
         end_time_seconds = (frame + 2) / fps
         end_time_mm_ss = datetime.utcfromtimestamp(end_time_seconds).strftime('%M:%S')
 
-        action_list = '\n'.join([f"  {action}" for action in actions])
+        action_list = None
+        if actions:
+            action_list = '\t' + '\n\t'.join([f"{action}" for action in actions])
 
         prompt = f"""
-        {start_time_mm_ss} - {end_time_mm_ss} Events. Starting:
-        Cursor position: {self._convert_pos_to_gemini_relative(self.start_cursor_pos)} to {self._convert_pos_to_gemini_relative(self.end_cursor_pos) if self.end_cursor_pos else 'N/A'}
-        Actions:
-        {action_list}
+{start_time_mm_ss} - {end_time_mm_ss} Event:
+Cursor positions: {self._convert_pos_to_gemini_relative(self.start_cursor_pos)} to {self._convert_pos_to_gemini_relative(self.end_cursor_pos) if self.end_cursor_pos else 'N/A'}
+Actions:
+{''.join(action_list) if action_list else 'No actions recorded.'}
         """
         return prompt
 

@@ -183,7 +183,6 @@ def main(path, percentile=95):
     debounced_logs.events = [log for log in logs if log.screenshot_path]
     logs.events = [log for log in logs if log.event_type != 'poll']
     timestamps, breaks, durations, thresholds = calculate_breaks(logs, percentile)
-    print(breaks)
     return aggregate_logs(debounced_logs, breaks)
 
 

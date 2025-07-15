@@ -12,7 +12,7 @@ from record import ScreenshotManager, InputEventHandler, EventQueue
 from modules import RawLog
 
 # TODO: factor out
-SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")}"
+SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
 SCREENSHOT_DIR = SESSION_DIR / "screenshots"
 LOG_FILE = SESSION_DIR / "events.jsonl"
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,7 +84,6 @@ def io_worker(event_queue: EventQueue):
         should_save, is_first = should_save_screenshot(raw.event_type, current_time, event_queue.debouncing_thresholds)
 
         if should_save:
-            print("should save now")
             save_screenshot_and_log(raw, current_time)
 
             if raw.event_type in pending_events:
@@ -93,7 +92,6 @@ def io_worker(event_queue: EventQueue):
                     jf.write("\n")
                 del pending_events[raw.event_type]
         else:
-            print("should save later")
             pending_events[raw.event_type] = (raw, current_time)
 
         event_queue.queue.task_done()

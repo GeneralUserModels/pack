@@ -43,42 +43,42 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
         logs_prompt = [a.to_prompt(2 * i) for i, a in enumerate(agg_logs)]
 
         prompt_template = f"""
-        I got this annotated video composed of a series of annotated screenshots, one each second. Thereby the screenshots have annotations baked into them:
+I got this annotated video composed of a series of annotated screenshots, one each second. Thereby the screenshots have annotations baked into them:
 
-        Mouse Interactions
-        Click Markers (Circular indicators):
-        Red circles: Left mouse button clicks
-        Blue circles: Right mouse button clicks
-        Green circles: Middle mouse button clicks
-        Yellow circles: Other/unknown mouse button clicks
-        Each click marker appears as a filled circle with a black outline at the exact location where the mouse click occurred.
+Mouse Interactions
+Click Markers (Circular indicators):
+Red circles: Left mouse button clicks
+Blue circles: Right mouse button clicks
+Green circles: Middle mouse button clicks
+Yellow circles: Other/unknown mouse button clicks
+Each click marker appears as a filled circle with a black outline at the exact location where the mouse click occurred.
 
-        Cursor Movement Annotations
-        Movement Arrows:
-        Orange arrows: Standard cursor movements during regular interactions
-        Magenta arrows: Cursor movements between different interaction sequences or logs
-        Lime green dots: Starting positions of cursor movements
-        Dark green outline: Border around start position markers
-        Arrow Components:
-        Line: Shows the path of cursor movement
-        Arrowhead: Points to the final position of the cursor
-        Start marker: Small lime green circle indicating where the movement began
+Cursor Movement Annotations
+Movement Arrows:
+Orange arrows: Standard cursor movements during regular interactions
+Magenta arrows: Cursor movements between different interaction sequences or logs
+Lime green dots: Starting positions of cursor movements
+Dark green outline: Border around start position markers
+Arrow Components:
+Line: Shows the path of cursor movement
+Arrowhead: Points to the final position of the cursor
+Start marker: Small lime green circle indicating where the movement began
 
-        Additionally I got a log file, logging all user interactions with the system. They are in MM:SS format corresponding to the video timestamps:
+Additionally I got a log file, logging all user interactions with the system. They are in MM:SS format corresponding to the video timestamps and list all actions, which are user inputs, in an aggregated form. Keys are delimited by '|' pipe symbol:
 
-        {logs_prompt}
+{''.join(logs_prompt)}
 
-        Given this information, please generate a list of higher level user interactions, so called tasks. Each task describes what the user is doing.
-        Therefor use this JSON format:
-        [
-            {{
-                "start": "MM:SS",
-                "end": "MM:SS",
-                "high_level_task": "High level task, e.g. User is interacting with the settings page",
-                "task_category": "Category of the task, e.g. Navigation, Configuration, etc.",
-                "task": "Description of the task, e.g. user pairs bluetooth earbuds in settings",
-            }}
-        ]
+Given this information, please generate a list of higher level user interactions, so called tasks. Each task describes what the user is doing.
+Therefor use this JSON format:
+[
+    {{
+        "start": "MM:SS",
+        "end": "MM:SS",
+        "high_level_task": "High level task, e.g. User is interacting with the settings page",
+        "task_category": "Category of the task, e.g. Navigation, Configuration, etc.",
+        "task": "Description of the task, e.g. user pairs bluetooth earbuds in settings",
+    }}
+]
         """
 
         print("Generating content with Gemini...")
@@ -97,8 +97,9 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_json_path):
 
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
-    VIDEO_PATH = Path(__file__).parent.parent / "logs" / "session_2025-07-11_04-03-47-306009" / f"agg_{PERCENTILE}_visualizations" / "event_logs_combined.mp4"
-    AGG_JSON = Path(__file__).parent.parent / "logs" / 'session_2025-07-11_04-03-47-306009' / f'aggregated_logs_{PERCENTILE}.json'
+    SESSION = "session_2025-07-14_20-15-27-182853"
+    VIDEO_PATH = Path(__file__).parent.parent / "logs" / SESSION / "event_logs_video.mp4"
+    AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
 
     result = prompt_gemini_with_annotated_video(API_KEY, VIDEO_PATH, AGG_JSON)
 

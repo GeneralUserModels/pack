@@ -203,11 +203,12 @@ def format_event_info(log: dict):
     info_lines = []
 
     keyboard_events = [e for e in log.events if e.get('event_type', '').startswith('keyboard')]
+    keys_str = "Keys: <none>"
     if keyboard_events:
         keys = [e.get('details', {}).get('key', 'unknown') for e in keyboard_events]
-        info_lines.append(f"Keys: {', '.join(keys)}")
-    else:
-        info_lines.append("Keys: <none>")
+        keys = [key if key else "unknown" for key in keys]
+        keys_str = f"Keys: {', '.join(keys)}"
+    info_lines.append(keys_str)
 
     mouse_events = extract_mouse_events(log.events)
     if mouse_events:
