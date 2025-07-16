@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
+
 import numpy as np
 
 from modules import AggregatedLog, RawLogEvents
@@ -103,31 +104,61 @@ def calculate_breaks(events: list, percentile: int):
     durations["mouse_down"] = []
     thresholds["mouse_down"] = 0
 
-    events_dict = {(e.timestamp, e.event_type): e for e in events}
-    for proc_evt in processed_mouse_events:
-        key = (proc_evt.timestamp, proc_evt.event_type)
-        if key in events_dict:
-            events_dict[key].details = proc_evt.details
-
     return timestamps, breaks, durations, thresholds
 
 
-def aggregate_logs(events: RawLogEvents, breaks: dict):
-    events.sort()
+def sort_and_fill_edges(breaks, gap_threshold=60):
     edges = sorted({
         ts.timestamp()
         for spans in breaks.values()
         for start, end in spans
         for ts in (start, end)
     })
+    result = []
+
+    for i in range(len(edges) - 1):
+        result.append(edges[i])
+
+        gap = edges[i + 1] - edges[i]
+        if gap > gap_threshold:
+            current = edges[i] + gap_threshold
+            while current < edges[i + 1]:
+                result.append(current)
+                current += gap_threshold
+
+    result.append(edges[-1])
+    return result
+
+
+def _debounce_press_event(events, debounce_event, max_duration):
+    def get_event_detail(event):
+        if event.event_type == 'mouse_down':
+            return event.details.get('button')
+        elif event.event_type == 'keyboard_press':
+            return extract_key(event.details)
+
+    cut_idx = None
+    for lookahead in events:
+        switched_screen = json.dumps(debounce_event.monitor) != json.dumps(lookahead.monitor)
+        if switched_screen or max_duration > lookahead.strp_timestamp - debounce_event.strp_timestamp:
+            break
+        if lookahead.event_type == debounce_event.event_type and get_event_detail(lookahead) == get_event_detail(debounce_event):
+            cut_idx = events.index(lookahead)
+            break
+    return cut_idx
+
+
+def aggregate_logs(events: RawLogEvents, breaks: dict):
+    events.sort()
+    edges = sort_and_fill_edges(breaks)
 
     logs = []
     start_idx = 0
 
     for edge in edges:
         for rel_idx, event in enumerate(events[start_idx:], start=start_idx):
-            ev_time = datetime.strptime(event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()
-            next_ev_time = datetime.strptime(events[rel_idx + 1].timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() if rel_idx + 1 < len(events) else float('inf')
+            ev_time = event.strp_timestamp
+            next_ev_time = events[rel_idx + 1].strp_timestamp if rel_idx + 1 < len(events) else float('inf')
             switched_screen = json.dumps(event.monitor) != json.dumps(events[start_idx].monitor)
             if ev_time <= edge and next_ev_time > edge:
                 cut_idx = rel_idx
@@ -140,29 +171,9 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
             switched_screen = False
 
         last_event = events[cut_idx]
-        evt_type = last_event.event_type
-
-        if evt_type == 'mouse_down' and not switched_screen:
-            button = last_event.details.get('button')
-            for lookahead in events[cut_idx + 1:]:
-                switched_screen = json.dumps(last_event.monitor) != json.dumps(lookahead.monitor)
-                if switched_screen or MAX_RELEASE_EVENT_DURATION > (datetime.strptime(lookahead.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() - datetime.strptime(last_event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()):
-                    break
-                # TODO: Threshold
-                if lookahead.event_type == 'mouse_up' and lookahead.details.get('button') == button:
-                    cut_idx = events.index(lookahead)
-                    break
-
-        elif evt_type == 'keyboard_press' and not switched_screen:
-            key = extract_key(last_event.details)
-            for lookahead in events[cut_idx + 1:]:
-                switched_screen = json.dumps(last_event.monitor) != json.dumps(lookahead.monitor)
-                if switched_screen or MAX_RELEASE_EVENT_DURATION > (datetime.strptime(lookahead.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp() - datetime.strptime(last_event.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()):
-                    break
-                # TODO: Threshold
-                if lookahead.event_type == 'keyboard_release' and extract_key(lookahead.details) == key:
-                    cut_idx = events.index(lookahead)
-                    break
+        if last_event.event_type not in ['mouse_down', 'keyboard_press']:
+            _cut_idx = _debounce_press_event(events, last_event, MAX_RELEASE_EVENT_DURATION)
+            cut_idx = _cut_idx if _cut_idx is not None else cut_idx
 
         logs.append(AggregatedLog.from_raw_log_events(events[start_idx:cut_idx + 1]))
         start_idx = cut_idx + 1

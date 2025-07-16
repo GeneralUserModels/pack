@@ -1,34 +1,19 @@
 import time
-import datetime
 import json
 import threading
 from pathlib import Path
 from queue import Empty
 from typing import Dict
 
-from pynput import keyboard, mouse
+from pynput import mouse
 
-from record import ScreenshotManager, InputEventHandler, EventQueue
+from record import ScreenshotManager, EventQueue
 from modules import RawLog
-
-# TODO: factor out
-SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
-SCREENSHOT_DIR = SESSION_DIR / "screenshots"
-LOG_FILE = SESSION_DIR / "events.jsonl"
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
-SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-
-DEBOUNCING_THRESHOLDS = {
-    "mouse_move": 2.0,
-    "mouse_scroll": 3.0,
-    "keyboard_press": 3.0,
-    "keyboard_release": 3.0,
-}
 
 stop_event = threading.Event()
 
 
-def io_worker(event_queue: EventQueue):
+def io_worker(event_queue: EventQueue, screenshot_dir: Path, log_file: Path):
     last_saved_times: Dict[str, float] = {}
     pending_events: Dict[str, tuple] = {}
 
@@ -49,12 +34,12 @@ def io_worker(event_queue: EventQueue):
 
     def save_screenshot_and_log(raw: 'RawLog', current_time: float):
         if raw.screenshot_bytes is not None:
-            shot_path = SCREENSHOT_DIR / f"{raw.timestamp}_{raw.event_type}.jpg"
+            shot_path = screenshot_dir / f"{raw.timestamp}_{raw.event_type}.jpg"
             with open(shot_path, "wb") as imgf:
                 imgf.write(raw.screenshot_bytes)
             raw.screenshot_path = str(shot_path)
 
-        with open(LOG_FILE, "a") as jf:
+        with open(log_file, "a") as jf:
             json.dump(raw.to_dict(), jf)
             jf.write("\n")
 
@@ -87,7 +72,7 @@ def io_worker(event_queue: EventQueue):
             save_screenshot_and_log(raw, current_time)
 
             if raw.event_type in pending_events:
-                with open(LOG_FILE, "a") as jf:
+                with open(log_file, "a") as jf:
                     json.dump(pending_events[raw.event_type][0].to_dict(), jf)
                     jf.write("\n")
                 del pending_events[raw.event_type]
@@ -120,27 +105,3 @@ def poll_worker(screenshot_manager: ScreenshotManager, event_queue: EventQueue, 
             time.sleep(interval)
     finally:
         screenshot_manager.close()
-
-
-def main():
-    print(f"Session started: {SESSION_DIR}")
-    print(f"Screenshots: {SCREENSHOT_DIR}")
-
-    event_queue = EventQueue(maxsize=1024, debouncing_thresholds=DEBOUNCING_THRESHOLDS)
-    screenshot_manager = ScreenshotManager()
-
-    threading.Thread(target=io_worker, args=(event_queue,), daemon=True).start()
-    threading.Thread(target=poll_worker, args=(screenshot_manager, event_queue, 60.0), daemon=True).start()
-
-    h = InputEventHandler(event_queue, screenshot_manager)
-
-    with keyboard.Listener(on_press=h.on_press, on_release=h.on_release) as kl, \
-            mouse.Listener(on_click=h.on_click, on_move=h.on_move, on_scroll=h.on_scroll) as ml:
-        kl.join()
-        ml.join()
-
-    event_queue.queue.join()
-
-
-if __name__ == "__main__":
-    main()

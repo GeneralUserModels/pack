@@ -74,9 +74,8 @@ Therefor use this JSON format:
     {{
         "start": "MM:SS",
         "end": "MM:SS",
-        "high_level_task": "High level task, e.g. User is interacting with the settings page",
-        "task_category": "Category of the task, e.g. Navigation, Configuration, etc.",
         "task": "Description of the task, e.g. user pairs bluetooth earbuds in settings",
+        "confidence": "between 0 and 1, how confident you are that this task is correct"
     }}
 ]
         """

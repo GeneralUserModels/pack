@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Tuple, Dict, Any
+from datetime import datetime
 
 
 @dataclass
@@ -45,6 +46,10 @@ class RawLog:
             screenshot_size=self.screenshot_size,
             screenshot_path=self.screenshot_path
         )
+
+    @property
+    def strp_timestamp(self) -> datetime:
+        return datetime.strptime(self.timestamp, "%Y-%m-%d_%H-%M-%S-%f").timestamp()
 
     def __gt__(self, other: 'RawLog') -> bool:
         return self.timestamp > other.timestamp
