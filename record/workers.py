@@ -94,6 +94,9 @@ def poll_worker(screenshot_manager: ScreenshotManager, event_queue: EventQueue, 
 
             png, size = screenshot_manager.take_screenshot_for_monitor(active_mon)
 
+            if png is None or size is None:
+                continue
+            
             event_queue.enqueue(
                 event_type="poll",
                 details={},

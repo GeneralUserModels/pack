@@ -33,15 +33,21 @@ class ScreenshotManager:
             return sct.monitors[0]
 
     def take_screenshot_for_monitor(self, mon: dict, quality: int = 95) -> tuple[bytes, tuple[int, int]]:
-        with self._get_sct_context(with_cursor=True) as sct:
-            img = sct.grab(mon)
-            pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
+        try: 
+            with self._get_sct_context(with_cursor=True) as sct:
+                img = sct.grab(mon)
+                pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
 
-            jpeg_buffer = io.BytesIO()
-            pil_img.save(jpeg_buffer, format='JPEG', quality=quality)
-            jpeg_data = jpeg_buffer.getvalue()
+                jpeg_buffer = io.BytesIO()
+                pil_img.save(jpeg_buffer, format='JPEG', quality=quality)
+                jpeg_data = jpeg_buffer.getvalue()
 
-            return jpeg_data, img.size
+                print(f"Screenshot taken for monitor: {mon}")
+
+                return jpeg_data, img.size
+        except Exception as e:
+            print(f"Error taking screenshot: {e}")
+            return None, None
 
     def take_virtual_screenshot(self, quality: int = 95) -> tuple[bytes, tuple[int, int]]:
         with self._get_sct_context(with_cursor=True) as sct:

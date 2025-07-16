@@ -20,6 +20,10 @@ class InputEventHandler:
         mon = self.screenshot_manager.get_active_monitor(x, y)
 
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
+
+        if png is None or size is None:
+            return
+
         self.queue.enqueue(
             event_type="keyboard_press",
             details={"key": k},
@@ -36,6 +40,10 @@ class InputEventHandler:
         x, y = self.mouse_controller.position
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
+
+        if png is None or size is None:
+            return
+
         self.queue.enqueue(
             event_type="keyboard_release",
             details={"key": k},
@@ -47,6 +55,10 @@ class InputEventHandler:
     def on_click(self, x, y, button, pressed):
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
+
+        if png is None or size is None:
+            return
+
         evt = "mouse_down" if pressed else "mouse_up"
         self.queue.enqueue(
             event_type=evt,
@@ -63,6 +75,10 @@ class InputEventHandler:
         self._last_move_time = now
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
+
+        if png is None or size is None:
+            return
+
         self.queue.enqueue(
             event_type="mouse_move",
             details={},
@@ -74,6 +90,10 @@ class InputEventHandler:
     def on_scroll(self, x, y, dx, dy):
         mon = self.screenshot_manager.get_active_monitor(x, y)
         png, size = self.screenshot_manager.take_screenshot_for_monitor(mon)
+
+        if png is None or size is None:
+            return
+
         self.queue.enqueue(
             event_type="mouse_scroll",
             details={"scroll": [dx, dy]},
