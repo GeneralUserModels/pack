@@ -23,6 +23,8 @@ class InputEventHandler:
 
         if png is None or size is None:
             return
+        
+        print(f"Screenshot taken for monitor: {mon} for keypress")
 
         self.queue.enqueue(
             event_type="keyboard_press",
@@ -43,6 +45,8 @@ class InputEventHandler:
 
         if png is None or size is None:
             return
+        
+        print(f"Screenshot taken for monitor: {mon} for keyrelease")
 
         self.queue.enqueue(
             event_type="keyboard_release",
@@ -58,6 +62,8 @@ class InputEventHandler:
 
         if png is None or size is None:
             return
+        
+        print(f"Screenshot taken for monitor: {mon} for click")
 
         evt = "mouse_down" if pressed else "mouse_up"
         self.queue.enqueue(
@@ -78,6 +84,8 @@ class InputEventHandler:
 
         if png is None or size is None:
             return
+        
+        print(f"Screenshot taken for monitor: {mon} for mouse move")
 
         self.queue.enqueue(
             event_type="mouse_move",
@@ -93,6 +101,8 @@ class InputEventHandler:
 
         if png is None or size is None:
             return
+        
+        print(f"Screenshot taken for monitor: {mon} for mouse scroll")
 
         self.queue.enqueue(
             event_type="mouse_scroll",

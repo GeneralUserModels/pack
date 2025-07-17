@@ -42,8 +42,6 @@ class ScreenshotManager:
                 pil_img.save(jpeg_buffer, format='JPEG', quality=quality)
                 jpeg_data = jpeg_buffer.getvalue()
 
-                print(f"Screenshot taken for monitor: {mon}")
-
                 return jpeg_data, img.size
         except Exception as e:
             print(f"Error taking screenshot: {e}")
