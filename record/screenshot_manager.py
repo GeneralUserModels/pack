@@ -33,7 +33,7 @@ class ScreenshotManager:
             return sct.monitors[0]
 
     def take_screenshot_for_monitor(self, mon: dict, quality: int = 95) -> tuple[bytes, tuple[int, int]]:
-        try: 
+        try:
             with self._get_sct_context(with_cursor=True) as sct:
                 img = sct.grab(mon)
                 pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")

@@ -91,11 +91,10 @@ def poll_worker(screenshot_manager: ScreenshotManager, event_queue: EventQueue, 
             x, y = mouse.Controller().position
 
             active_mon = screenshot_manager.get_active_monitor(x, y)
-
             png, size = screenshot_manager.take_screenshot_for_monitor(active_mon)
 
             print(f"Screenshot taken for monitor: {active_mon} for poll")
-            
+
             event_queue.enqueue(
                 event_type="poll",
                 details={},
