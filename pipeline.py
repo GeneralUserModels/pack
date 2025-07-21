@@ -106,11 +106,8 @@ def convert_to_video_action(aggregated_logs, session_path):
             print("✗ No aggregated logs available. Please run 'Aggregate logs' first.")
             return
 
-        seconds_per_frame = input("Enter seconds per frame (default 1): ").strip()
-        seconds_per_frame = float(seconds_per_frame) if seconds_per_frame else 1.0
-
         convert_to_video(aggregated_logs, "event_logs_video", session_path,
-                         should_annotate=True, seconds_per_frame=seconds_per_frame)
+                         should_annotate=True, seconds_per_frame=1.0)
         print("✓ Video conversion completed")
     except Exception as e:
         print(f"✗ Error converting to video: {e}")
