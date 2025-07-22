@@ -23,4 +23,11 @@ uv run -m record
 ### run aggregation / evaluation
 ```shell
 uv run -m pipeline
+# for label aggregation, 1 to create aggregated logs and 3 to create a video
+```
+
+### label video in chunks (Gemini)
+```shell
+# adjust SESSION variable of the prompt/prompt.py to match your session directory 
+uv run -m prompt.prompt
 ```
