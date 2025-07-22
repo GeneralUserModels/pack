@@ -183,116 +183,11 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_logs, chunk_star
     try:
         logs_prompt = [a.to_prompt(2 * i) for i, a in enumerate(agg_logs)]
 
-        prompt_template = f"""I have an annotated video composed of a series of screenshots, one per second, with the following baked-in annotations:
+        with open(Path(__file__).parent / "prompt.txt", "r") as f:
+            prompt_template = f.read()
 
-Mouse Interactions  
-- **Click Markers (circular indicators)**:  
-  - Red circles: Left mouse button clicks  
-  - Blue circles: Right mouse button clicks  
-  - Green circles: Middle mouse button clicks  
-  - Yellow circles: Other/unknown mouse button clicks  
-  - Each marker has a black outline and appears at the exact click location  
-
-Cursor Movement Annotations  
-- **Movement Arrows**:  
-  - Orange arrows: Regular cursor movements  
-  - Magenta arrows: Cursor transitions between different interaction sequences/logs  
-  - Lime green dots with dark green outline: Starting positions of cursor movements  
-- **Arrow Components**:  
-  - Line: Cursor path  
-  - Arrowhead: Final cursor position  
-  - Start marker: Small lime green circle at movement start  
-
-Additionally, I have a log file listing all user inputs in MM:SS format matching the video timestamps. Actions are aggregated and keys are delimited by a pipe symbol (`|`):  
-
-## Logs
-
-{''.join(logs_prompt)}
-
-## Task
-
-Using this data, generate a list of higher-level user interactions (called **tasks**) that describe what the user is doing.  
-
-**Output format**: Return a JSON array of task objects in this exact structure:
-
-[
-    {
-        "start": "MM:SS",
-        "end": "MM:SS",
-        "caption": "Describe the user’s action with context and names.",
-    }
-]
-
-## Guidelines
-
-- DON'T give raw input like coordinates or raw key presses. 
-- Instead, provide a description of the user’s intention (e.g., 'User clicked on start search button' or 'User selected 7 cells in statistics sheet in analysis Excel file').
-- The caption should be a single action, not a sequence of actions.
-- Be specific. Mention the name of the application, file, website, etc.
-
-**Examples**:
-[
-    {
-        "start": "01:12",
-        "end": "01:13",
-        "caption": "User double-clicked the 'Google Chrome' shortcut on the desktop"
-    },
-    {
-        "start": "01:15",
-        "end": "01:17",
-        "caption": "User typed 'google.com' into the address bar and pressed Enter"
-    },
-    {
-        "start": "01:17",
-        "end": "01:20",
-        "caption": "User typed 'best budget noise cancelling headphones 2024' into the Google search bar"
-    },
-    {
-        "start": "01:20",
-        "end": "01:25",
-        "caption": "User scrolled through Google search results for 'best budget noise cancelling headphones 2024'"
-    },
-    {
-        "start": "03:17",
-        "end": "03:21",
-        "caption": "User clicked on the tab titled 'LoRA: Low-Rank Adaptation of Large Language Models - arXiv' in Google Chrome"
-    },
-    {
-        "start": "04:21",
-        "end": "04:23",
-        "caption": "User scrolled through the article titled 'The Perfect Ice Cream: A Summer Recipe Guide' on the New York Times website"
-    },
-    {
-        "start": "04:23",
-        "end": "04:25",
-        "caption": "User scrolled to the bottom of the article 'The Perfect Ice Cream: A Summer Recipe Guide'"
-    },
-    {
-        "start": "04:30",
-        "end": "04:33",
-        "caption": "User clicked on the messaging tab titled 'Team Chat – Product Launch'"
-    },
-    {
-        "start": "04:33",
-        "end": "04:36",
-        "caption": "User scrolled through messages in 'Team Chat – Product Launch'"
-    },
-    {
-        "start": "05:14",
-        "end": "05:17",
-        "caption": "User clicked the tab titled 'analysis.ipynb' in Visual Studio Code"
-    },
-    {
-        "start": "05:17",
-        "end": "05:22",
-        "caption": "User viewed the notebook 'analysis.ipynb' in Visual Studio Code"
-    }
-]
-
-Return ONLY the JSON array of tasks. No other text or explanation."""
-
+        prompt_template = prompt_template.replace("{{LOGS}}", ''.join(logs_prompt))
         print("Generating content with Gemini...")
-        print(prompt_template + "...")
         model = setup_gemini_api(api_key)
         video_file = upload_video_file(str(video_path))
         print(f"Video file: {video_file.uri}")
