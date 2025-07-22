@@ -78,14 +78,13 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
 
 
 def split_logs(logs, chunk_duration_seconds):
-    """Split logs into chunks based on timestamp"""
     chunks = []
     current_chunk = []
 
     for log in logs:
         current_chunk.append(log)
 
-        if len(current_chunk) >= chunk_duration_seconds:
+        if len(current_chunk) >= chunk_duration_seconds // 2:
             chunks.append(current_chunk)
             current_chunk = []
 
@@ -106,12 +105,12 @@ def parse_jsonl_response(response_text):
         cleaned_text = response_text.strip()
 
         if cleaned_text.startswith('```jsonl'):
-            cleaned_text = cleaned_text[7:]
+            cleaned_text = cleaned_text.replace('```jsonl', '', 1).strip()
         elif cleaned_text.startswith('```'):
-            cleaned_text = cleaned_text[3:]
+            cleaned_text = cleaned_text.replace('```', '', 1).strip()
 
         if cleaned_text.endswith('```'):
-            cleaned_text = cleaned_text[:-3]
+            cleaned_text = cleaned_text[:-3].strip()
 
         cleaned_text = cleaned_text.strip()
 
@@ -181,7 +180,7 @@ Therefore use this JSONL format:
     {{
         "start": "MM:SS",
         "end": "MM:SS",
-        "caption": "describe the action the user did, some context, the location and KEEP NAMES! Do information without context, like 'clicked at (200, 300)', instead describe what the user did (e.g. user clicked on 'start search' button)",
+        "caption": "describe the action the user did, some context, the location and KEEP NAMES! DONT provide information without context, like 'clicked at (200, 300)', instead describe what the user did (e.g. user clicked on 'start search' button). Similarely don't provide raw information for keyboard inputs, so instead of e.g. 'User hold shift and ctrl then pressed left arrow', state what the user did, like 'user selected 7 cells in statistics sheet in analysis excle file'",
         "confidence": "Rate between 1 and 10, where 1 means you are very unsure and 10 means you are incredibly sure about the caption.",
     }}
 </explanation>
@@ -215,7 +214,7 @@ Therefore use this JSONL format:
         model = setup_gemini_api(api_key)
         video_file = upload_video_file(str(video_path))
         print(f"Video file: {video_file.uri}")
-        print(f"Prompt template:\n{prompt_template}")
+        print(f"Prompt template:\n{agg_logs[0].start_timestamp} - {agg_logs[-1].end_timestamp}")
         response = model.generate_content([prompt_template, video_file])
         return response.text
     except Exception as e:
@@ -223,7 +222,7 @@ Therefore use this JSONL format:
         return None
 
 
-def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, session_folder=None):
+def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, session_folder=None, percentile=90):
     try:
         with open(agg_json_path, "r") as f:
             logs_data = json.load(f)

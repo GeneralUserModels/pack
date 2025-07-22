@@ -8,7 +8,7 @@ from modules import AggregatedLog, RawLogEvents
 
 PERCENTILE = 95
 
-MAX_RELEASE_EVENT_DURATION = 1  # seconds, used to filter out noise in keyboard events
+MAX_RELEASE_EVENT_DURATION = 1.0  # seconds, used to filter out noise in keyboard events
 MOUSE_DOWN_DEBOUNCE = 500  # milliseconds
 MOUSE_DOWN_POS_OFFSET = 0.01  # % of screen height, width
 
@@ -117,7 +117,7 @@ def _debounce_press_event(events, debounce_event, max_duration, offset):
     cut_idx = None
     for lookahead in events:
         switched_screen = json.dumps(debounce_event.monitor) != json.dumps(lookahead.monitor)
-        if switched_screen or (lookahead.strp_timestamp - debounce_event.strp_timestamp) > max_duration:
+        if switched_screen or (lookahead.strp_timestamp - debounce_event.strp_timestamp) > max_duration or lookahead.event_type in ["mouse_down", "keyboard_press"]:
             break
 
         if debounce_event.event_type == 'mouse_down':
@@ -153,19 +153,20 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
     cut_idx = 0
 
     for edge in edges:
+        if edge < events[start_idx].strp_timestamp:
+            continue
         for rel_idx, event in enumerate(events[start_idx:], start=start_idx):
-            if event.event_type == 'mouse_down':
-                cut_idx = rel_idx
-                break
-
             ev_time = event.strp_timestamp
             next_ev_time = events[rel_idx + 1].strp_timestamp if rel_idx + 1 < len(events) else float('inf')
             switched_screen = json.dumps(event.monitor) != json.dumps(events[start_idx].monitor)
-            if ev_time <= edge and next_ev_time > edge:
+            if ev_time <= edge < next_ev_time:
                 cut_idx = rel_idx
                 break
             if switched_screen:
                 cut_idx = max(start_idx, rel_idx - 1)
+                break
+            if event.event_type == 'mouse_down':
+                cut_idx = rel_idx
                 break
         else:
             cut_idx = len(events) - 1
@@ -184,7 +185,6 @@ def aggregate_logs(events: RawLogEvents, breaks: dict):
 
     if start_idx < len(events):
         logs.append(AggregatedLog.from_raw_log_events(events[start_idx:]))
-
     return logs
 
 
