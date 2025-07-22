@@ -360,7 +360,7 @@ if __name__ == "__main__":
         AGG_JSON,
         video_length=VIDEO_LENGTH,
         session_folder=SESSION_FOLDER,
-        percentile=PERCENTILE,
+        percentile=PERCENTILE
     )
 
     if results:
