@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import codecs
 from pathlib import Path
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -100,58 +101,87 @@ def seconds_to_mmss(seconds):
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def parse_jsonl_response(response_text):
+def mmss_to_seconds(mmss):
     try:
+        parts = mmss.split(':')
+        if len(parts) == 2:
+            minutes, seconds = map(int, parts)
+            return minutes * 60 + seconds
+    except (ValueError, AttributeError):
+        pass
+    return 0
+
+
+def adjust_timestamps_in_tasks(tasks, chunk_start_seconds):
+    adjusted_tasks = []
+
+    for task in tasks:
+        adjusted_task = task.copy()
+
+        if 'start' in task and task['start']:
+            start_seconds = mmss_to_seconds(task['start'])
+            adjusted_start_seconds = start_seconds + chunk_start_seconds
+            adjusted_task['start'] = seconds_to_mmss(adjusted_start_seconds)
+
+        if 'end' in task and task['end']:
+            end_seconds = mmss_to_seconds(task['end'])
+            adjusted_end_seconds = end_seconds + chunk_start_seconds
+            adjusted_task['end'] = seconds_to_mmss(adjusted_end_seconds)
+
+        adjusted_tasks.append(adjusted_task)
+
+    return adjusted_tasks
+
+
+def parse_json_response(response_text):
+    try:
+        response_text = codecs.decode(response_text, "unicode_escape")
+
         cleaned_text = response_text.strip()
 
-        if cleaned_text.startswith('```jsonl'):
-            cleaned_text = cleaned_text.replace('```jsonl', '', 1).strip()
+        if cleaned_text.startswith('```json'):
+            cleaned_text = cleaned_text.replace('```json', '', 1).strip()
         elif cleaned_text.startswith('```'):
             cleaned_text = cleaned_text.replace('```', '', 1).strip()
-
         if cleaned_text.endswith('```'):
             cleaned_text = cleaned_text[:-3].strip()
 
         cleaned_text = cleaned_text.strip()
 
-        parsed_objects = []
-        lines = cleaned_text.split('\n')
+        try:
+            parsed_data = json.loads(cleaned_text)
 
-        for line_num, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
+            if not isinstance(parsed_data, list):
+                parsed_data = [parsed_data]
 
-            try:
-                parsed_obj = json.loads(line)
-                parsed_objects.append(parsed_obj)
-            except json.JSONDecodeError as e:
-                print(f"Failed to parse line {line_num}: {line}")
-                print(f"JSON error: {e}")
-                return {
-                    'success': False,
-                    'parsed_data': None,
-                    'raw_text': response_text
-                }
-
-        return {
-            'success': True,
-            'parsed_data': parsed_objects,
-            'raw_text': response_text
-        }
+            return {
+                'success': True,
+                'parsed_data': parsed_data,
+                'raw_text': response_text
+            }
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON: {cleaned_text[:200]}...")
+            print(f"JSON error: {e}")
+            return {
+                'success': False,
+                'parsed_data': None,
+                'raw_text': response_text,
+                'error': str(e)
+            }
 
     except Exception as e:
-        print(f"Error parsing JSONL response: {e}")
+        print(f"Error parsing JSON response: {e}")
         return {
             'success': False,
             'parsed_data': None,
-            'raw_text': response_text
+            'raw_text': response_text,
+            'error': str(e)
         }
 
 
 def prompt_gemini_with_annotated_video(api_key, video_path, agg_logs, chunk_start_seconds=0):
     try:
-        logs_prompt = [a.to_prompt(2 * i + chunk_start_seconds * 2) for i, a in enumerate(agg_logs)]
+        logs_prompt = [a.to_prompt(2 * i) for i, a in enumerate(agg_logs)]
 
         prompt_template = f"""
 I got this annotated video composed of a series of annotated screenshots, one each second. Thereby the screenshots have annotations baked into them:
@@ -175,42 +205,48 @@ Start marker: Small lime green circle indicating where the movement began
 Additionally I got a log file, logging all user interactions with the system. They are in MM:SS format corresponding to the video timestamps and list all actions, which are user inputs, in an aggregated form. Keys are delimited by '|' pipe symbol:
 {''.join(logs_prompt)}
 Given this information, please generate a list of higher level user interactions, so called tasks. Each task describes what the user is doing.
-Therefore use this JSONL format:
-<explanation>
+Therefore use this JSON format - return a JSON array of task objects:
+
+[
     {{
         "start": "MM:SS",
         "end": "MM:SS",
-        "caption": "describe the action the user did, some context, the location and KEEP NAMES! DONT provide information without context, like 'clicked at (200, 300)', instead describe what the user did (e.g. user clicked on 'start search' button). Similarely don't provide raw information for keyboard inputs, so instead of e.g. 'User hold shift and ctrl then pressed left arrow', state what the user did, like 'user selected 7 cells in statistics sheet in analysis excle file'",
-        "confidence": "Rate between 1 and 10, where 1 means you are very unsure and 10 means you are incredibly sure about the caption.",
+        "caption": "describe the action the user did, some context, the location and KEEP NAMES! DONT provide information without context, like 'clicked at (200, 300)', instead describe what the user did (e.g. user clicked on 'start search' button). Similarly don't provide raw information for keyboard inputs, so instead of e.g. 'User hold shift and ctrl then pressed left arrow', state what the user did, like 'user selected 7 cells in statistics sheet in analysis excel file'",
+        "confidence": 7
+    }},
+    {{
+        "start": "MM:SS",
+        "end": "MM:SS",
+        "caption": "description of next task",
+        "confidence": 9
     }}
-</explanation>
-<examples>
-    {{
-        "start": "01:12",
-        "end": "01:17",
-        "caption": "typed 'google.com' into the search bar in google chrome",
-        "confidence": "7",
+]
 
-    }},
-    {{
-        "start": "03:15",
-        "end": "03:21",
-        "caption": "Switch to google chrome window displaying LoRA paper",
-        "confidence": "9",
+Examples of individual task objects:
+{{
+    "start": "01:12",
+    "end": "01:17",
+    "caption": "typed 'google.com' into the search bar in google chrome",
+    "confidence": 7
+}},
+{{
+    "start": "03:15",
+    "end": "03:21",
+    "caption": "Switch to google chrome window displaying LoRA paper",
+    "confidence": 9
+}},
+{{
+    "start": "05:12",
+    "end": "05:22",
+    "caption": "Switched to 'analysis.ipynb' notebook in VSCode",
+    "confidence": 6
+}}
 
-    }},
-    {{
-        "start": "05:12",
-        "end": "05:22",
-        "caption": "Switched to 'analysis.ipynb' notebook in VSCode",
-        "confidence": "6",
-
-    }},
-
-</examples>
+Please return ONLY the JSON array of tasks, no additional text or explanations.
         """
 
         print("Generating content with Gemini...")
+        print(prompt_template + "...")
         model = setup_gemini_api(api_key)
         video_file = upload_video_file(str(video_path))
         print(f"Video file: {video_file.uri}")
@@ -238,7 +274,7 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
 
         if session_folder is None:
             session_folder = video_path.parent
-        chunks_dir = Path(session_folder) / f"chunks_{PERCENTILE}_{video_length}"
+        chunks_dir = Path(session_folder) / f"chunks_{percentile}_{video_length}"
         chunks_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Splitting video into {video_length}-second chunks...")
@@ -260,7 +296,7 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
             )
 
             if raw_result:
-                parsed_result = parse_jsonl_response(raw_result)
+                parsed_result = parse_json_response(raw_result)
 
                 chunk_result_path = chunks_dir / f"chunk_{i:03d}_result.json"
                 chunk_info = {
@@ -271,13 +307,19 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
                 }
 
                 if parsed_result['success']:
-                    chunk_info["result"] = parsed_result['parsed_data']
-                    chunk_info["result_type"] = "jsonl"
-                    print(f"Successfully parsed {len(parsed_result['parsed_data'])} JSONL objects")
+                    adjusted_tasks = adjust_timestamps_in_tasks(parsed_result['parsed_data'], chunk_start_seconds)
+
+                    chunk_info["result"] = adjusted_tasks
+                    chunk_info["result_type"] = "json"
+                    print(f"Successfully parsed {len(adjusted_tasks)} JSON task objects")
+
+                    for task in adjusted_tasks[:2]:
+                        print(f"  {task.get('start', '??')} - {task.get('end', '??')}: {task.get('caption', 'No caption')[:100]}")
                 else:
                     chunk_info["result"] = parsed_result['raw_text']
                     chunk_info["result_type"] = "text"
-                    print("Failed to parse JSONL, storing as raw text")
+                    chunk_info["error"] = parsed_result.get('error', 'Unknown parsing error')
+                    print("Failed to parse JSON, storing as raw text")
 
                 with open(chunk_result_path, "w") as f:
                     json.dump(chunk_info, f, indent=2)
@@ -285,9 +327,7 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
                 print(f"Saved chunk result to: {chunk_result_path}")
                 print(f"Chunk {i + 1} response preview:")
                 if parsed_result['success']:
-                    print(f"Parsed {len(parsed_result['parsed_data'])} tasks")
-                    for task in parsed_result['parsed_data'][:2]:
-                        print(f"  {task.get('start', '??')} - {task.get('end', '??')}: {task.get('caption', 'No caption')[:100]}")
+                    print(f"Parsed {len(adjusted_tasks)} tasks with adjusted timestamps")
                 else:
                     print(f"Raw text (first 200 chars): {raw_result[:200]}...")
 
@@ -304,7 +344,7 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
 
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
-    PERCENTILE = 90
+    PERCENTILE = 87
     SESSION = "session_2025-07-17_10-06-32"
     VIDEO_PATH = Path(__file__).parent.parent / "logs" / SESSION / f"event_logs_video_{PERCENTILE}.mp4"
     AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
@@ -317,7 +357,8 @@ if __name__ == "__main__":
         VIDEO_PATH,
         AGG_JSON,
         video_length=VIDEO_LENGTH,
-        session_folder=SESSION_FOLDER
+        session_folder=SESSION_FOLDER,
+        percentile=PERCENTILE
     )
 
     if results:
