@@ -6,7 +6,21 @@
 
 ```shell
 # setup once
-git clone git@github.com:valteu/gum-end-to-end.git
+git clone git@github.com:GeneralUserModels/pack.git
 uv sync --python 3.12.7
+```
+
+### Activate environment
+```shell
 source .venv/bin/activate
+```
+
+### run record
+```shell
+uv run -m record
+```
+
+### run aggregation / evaluation
+```shell
+uv run -m pipeline
 ```

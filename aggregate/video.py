@@ -306,7 +306,7 @@ def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None, ta
     print(f"Saved visualization: {out_path}")
 
 
-def convert_to_video(logs, video_name, video_dir, should_annotate=True, seconds_per_frame=1):
+def convert_to_video(logs, video_name, video_dir, should_annotate=True, seconds_per_frame=1, percentile=95):
     print("Finding maximum dimensions from all screenshots...")
     max_width, max_height = get_max_dimensions_from_logs(logs)
     print(f"Maximum dimensions: {max_width}x{max_height}")
@@ -367,7 +367,7 @@ def convert_to_video(logs, video_name, video_dir, should_annotate=True, seconds_
         fps = 1.0 / seconds_per_frame
 
         video_dir.mkdir(parents=True, exist_ok=True)
-        video_path = video_dir / f"{video_name}.mp4"
+        video_path = video_dir / f"{video_name}_{percentile}.mp4"
 
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         video_writer = cv2.VideoWriter(str(video_path), fourcc, fps, (max_width, max_height))
@@ -450,7 +450,7 @@ def main():
     print(f"Annotation: {'enabled' if args.annotate else 'disabled'}")
 
     if args.mode == 'video':
-        convert_to_video(logs, "event_logs_video", OUTPUT_DIR, args.annotate, args.seconds_per_frame)
+        convert_to_video(logs, "event_logs_video", OUTPUT_DIR, args.annotate, args.seconds_per_frame, percentile=PERCENTILE)
     else:
         render_images(logs, output_dir)
 

@@ -8,8 +8,6 @@ from aggregate.logs import calculate_breaks, aggregate_logs
 from modules.raw_log import RawLogEvents
 
 
-PERCENTILE = 95
-
 EVENT_Y = {
     "mouse_move": 1,
     "mouse_down": 2,
@@ -139,18 +137,6 @@ def create_interactive_plot(logs: RawLogEvents):
                 row=2, col=1
             )
 
-        # fig.add_trace(
-        #     go.Histogram(
-        #         x=all_durations,
-        #         nbinsx=50,
-        #         name="Duration Distribution",
-        #         marker_color="lightblue",
-        #         showlegend=False,
-        #         hovertemplate="Duration: %{x:.2f}s<br>Count: %{y}<extra></extra>"
-        #     ),
-        #     row=3, col=1
-        # )
-
     for event_type, thresh in thresholds.items():
         if event_type not in EVENT_Y:
             continue
@@ -226,7 +212,7 @@ def create_interactive_plot(logs: RawLogEvents):
     return fig, aggregated
 
 
-def plot_interactive(events_path: Path):
+def plot_interactive(events_path: Path, percentile: int):
     logs = RawLogEvents().load(events_path)
     logs.sort()
 
@@ -234,13 +220,13 @@ def plot_interactive(events_path: Path):
 
     fig.show()
 
-    fig.write_html(events_path.with_suffix(f'.{PERCENTILE}_perc_interactive.html'))
-    print(f"Interactive plot saved to: {events_path.with_suffix(f'.{PERCENTILE}_perc_interactive.html')}")
+    fig.write_html(events_path.with_suffix(f'.{percentile}_perc_interactive.html'))
+    print(f"Interactive plot saved to: {events_path.with_suffix(f'.{percentile}_perc_interactive.html')}")
 
     return aggregated
 
 
 if __name__ == '__main__':
-    # path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-11_04-03-47-306009' / 'events.jsonl'
+    PERCENTILE = 95
     path = Path(__file__).parent.parent / 'logs' / 'session_2025-07-13_15-59-04-565176' / 'events.jsonl'
-    plot_interactive(path)
+    plot_interactive(path, PERCENTILE)
