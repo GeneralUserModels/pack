@@ -18,7 +18,7 @@ Cursor Movement Annotations
   - Arrowhead: Final cursor position
   - Start marker: Small lime green circle at movement start
 
-Additionally, I have a log file listing all user inputs in MM:SS format matching the video timestamps. Actions are aggregated and keys are delimited by a pipe symbol (`|`):
+Additionally, I have a log file listing all user inputs in MM:SS format matching the video timestamps. Keys are delimited by a pipe symbol (`|`):
 
 ## Logs
 
@@ -40,68 +40,28 @@ Using this data, generate a list of higher-level user interactions (called **tas
 
 ## Guidelines
 
-- DON'T give raw input like coordinates or raw key presses.
-- Instead, provide a description of the user’s intention (e.g., 'User clicked on start search button' or 'User selected 7 cells in statistics sheet in analysis Excel file').
-- The caption should be a single action, not a sequence of actions.
-- Be specific. Mention the name of the application, file, website, etc.
+- Do NOT give raw input like coordinates or partial key presses (e.g. do not say User typed "p" or User clicked on coordinate X, Y).
+- Do NOT repeat tasks UNLESS the user does different things in between the tasks.  
+- Instead, aggregate tasks to provide a description of the user’s action (User selected cell N15 containing the average across WMT benchmark results).
+- The caption should be a single action, not a sequence of actions (e.g. do not say "Then the user...").
+- Be specific. When possible, mention the name of the application, file name, website, etc. Otherwise, describe what you see.
 
-**Examples**:
-[
-    {
-        "start": "01:12",
-        "end": "01:13",
-        "caption": "User double-clicked the 'Google Chrome' shortcut on the desktop"
-    },
-    {
-        "start": "01:15",
-        "end": "01:17",
-        "caption": "User typed 'google.com' into the address bar and pressed Enter"
-    },
-    {
-        "start": "01:17",
-        "end": "01:20",
-        "caption": "User typed 'best budget noise cancelling headphones 2024' into the Google search bar"
-    },
-    {
-        "start": "01:20",
-        "end": "01:25",
-        "caption": "User scrolled through Google search results for 'best budget noise cancelling headphones 2024'"
-    },
-    {
-        "start": "03:17",
-        "end": "03:21",
-        "caption": "User clicked on the tab titled 'LoRA: Low-Rank Adaptation of Large Language Models - arXiv' in Google Chrome"
-    },
-    {
-        "start": "04:21",
-        "end": "04:23",
-        "caption": "User scrolled through the article titled 'The Perfect Ice Cream: A Summer Recipe Guide' on the New York Times website"
-    },
-    {
-        "start": "04:23",
-        "end": "04:25",
-        "caption": "User scrolled to the bottom of the article 'The Perfect Ice Cream: A Summer Recipe Guide'"
-    },
-    {
-        "start": "04:30",
-        "end": "04:33",
-        "caption": "User clicked on the messaging tab titled 'Team Chat – Product Launch'"
-    },
-    {
-        "start": "04:33",
-        "end": "04:36",
-        "caption": "User scrolled through messages in 'Team Chat – Product Launch'"
-    },
-    {
-        "start": "05:14",
-        "end": "05:17",
-        "caption": "User clicked the tab titled 'analysis.ipynb' in Visual Studio Code"
-    },
-    {
-        "start": "05:17",
-        "end": "05:22",
-        "caption": "User viewed the notebook 'analysis.ipynb' in Visual Studio Code"
-    }
-]
+**Examples Captions**:
 
-Return ONLY the JSON array of tasks. No other text or explanation.
+- User double-clicked the 'Google Chrome' shortcut on the desktop
+- User typed 'google.com' into the address bar and pressed Enter
+- User typed 'best budget noise cancelling headphones 2024' into the Google search bar
+- User scrolled through Google search results for 'best budget noise cancelling headphones 2024'
+- User clicked on the second image result showing a pair of over-ear black and silver headphones in Google Images
+- User viewed the notebook 'analysis.ipynb' in Visual Studio Code containing code on aggregating interaction data
+- User clicked on the tab titled 'LoRA: Low-Rank Adaptation of Large Language Models - arXiv' in Google Chrome
+- User scrolled through the article titled 'The Perfect Ice Cream: A Summer Recipe Guide' on the New York Times website
+- User scrolled to the bottom of the article 'The Perfect Ice Cream: A Summer Recipe Guide'
+- User clicked on the messaging tab titled 'Team Chat – Product Launch'
+- User scrolled through messages in 'Team Chat – Product Launch'
+- User clicked the tab titled 'analysis.ipynb' in Visual Studio Code
+- User viewed the notebook 'analysis.ipynb' in Visual Studio Code containing code on aggregating interaction data
+- User clicked on cell N15 containing the average across WMT benchmark results
+- User clicked on the fileserver \"ftp://valentin.teutschbein@hpc.sci.hpi.de\" in the recent servers list
+
+Return ONLY the JSON array of tasks. No other text or explanation. Use the same level of detail as in the examples.
