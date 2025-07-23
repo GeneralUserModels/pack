@@ -57,11 +57,12 @@ def create_annotated_video(video_path, summary_json_path, output_video_path):
         chunks_data = json.load(f)
 
     all_tasks = []
-    for chunk in chunks_data:
-        if chunk.get('result_type') == 'json' and 'result' in chunk:
-            tasks = chunk['result']
-            if isinstance(tasks, list):
-                all_tasks.extend(tasks)
+    # for chunk in chunks_data:
+    chunk = chunks_data
+    if chunk.get('result_type') == 'json' and 'result' in chunk:
+        tasks = chunk['result']
+        if isinstance(tasks, list):
+            all_tasks.extend(tasks)
 
     if not all_tasks:
         print("No valid tasks found in summary file")
@@ -108,11 +109,10 @@ def create_annotated_video(video_path, summary_json_path, output_video_path):
 def main():
     PERCENTILE = 87
     SESSION = "session_2025-07-17_10-06-32"
-    VIDEO_LENGTH = 180
 
     base_path = Path(__file__).parent.parent / "logs" / SESSION
     video_path = base_path / f"event_logs_video_{PERCENTILE}.mp4"
-    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
+    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "chunk_000_result.json"
     output_video_path = base_path / f"annotated_video_{PERCENTILE}_{VIDEO_LENGTH}.mp4"
 
     if not video_path.exists():
@@ -143,11 +143,12 @@ def create_preview_annotations(summary_json_path, max_tasks=10):
         chunks_data = json.load(f)
 
     all_tasks = []
-    for chunk in chunks_data:
-        if chunk.get('result_type') == 'json' and 'result' in chunk:
-            tasks = chunk['result']
-            if isinstance(tasks, list):
-                all_tasks.extend(tasks)
+    # for chunk in chunks_data:
+    chunk = chunks_data
+    if chunk.get('result_type') == 'json' and 'result' in chunk:
+        tasks = chunk['result']
+        if isinstance(tasks, list):
+            all_tasks.extend(tasks)
 
     print(f"\nPreview of {min(len(all_tasks), max_tasks)} annotations:")
     print("-" * 80)
@@ -171,9 +172,9 @@ def create_preview_annotations(summary_json_path, max_tasks=10):
 if __name__ == "__main__":
     PERCENTILE = 87
     SESSION = "session_2025-07-17_10-06-32"
-    VIDEO_LENGTH = 180
+    VIDEO_LENGTH = 60
     base_path = Path(__file__).parent.parent / "logs" / SESSION
-    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
+    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "chunk_000_result.json"
     create_preview_annotations(summary_json_path)
 
     main()
