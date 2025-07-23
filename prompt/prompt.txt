@@ -1,3 +1,5 @@
+You are an expert-level video analyst specializing in reconstructing user behavior from annotated screen recordings. Your goal is to generate **concise, high-level user actions** based on visual and log data. You must reason about the **user’s intent** across time and provide **detailed yet non-repetitive** action summaries.
+
 I have an annotated video composed of a series of screenshots, one per second, with the following baked-in annotations:
 
 Mouse Interactions
@@ -26,25 +28,32 @@ Additionally, I have a log file listing all user inputs in MM:SS format matching
 
 ## Task
 
-Using this data, generate a list of higher-level user interactions (called **tasks**) that describe what the user is doing.
+Using this data, generate a list of higher-level user actions that describe what the user is doing.
 
-**Output format**: Return a JSON array of task objects in this exact structure:
+**Output format**: Return a JSON array of action objects in this exact structure:
 
 [
     {
         "start": "MM:SS",
         "end": "MM:SS",
-        "caption": "Describe the user’s action with context and names.",
+        "caption": "Describe the user’s action with context and names."
     }
 ]
 
 ## Guidelines
 
-- Do NOT give raw input like coordinates or partial key presses (e.g. do not say User typed "p" or User clicked on coordinate X, Y).
-- Do NOT repeat tasks UNLESS the user does different things in between the tasks.  
-- Instead, aggregate tasks to provide a description of the user’s action (User selected cell N15 containing the average across WMT benchmark results).
-- The caption should be a single action, not a sequence of actions (e.g. do not say "Then the user...").
-- Be specific. When possible, mention the name of the application, file name, website, etc. Otherwise, describe what you see.
+- NEVER generate captions with coordinates or partial key presses or commands 
+  - (e.g. NEVER say User typed "p" or User clicked on coordinate X, Y).
+- Carefully aggregate across timestamps / screenshots to provide a description of the user’s single action. 
+  - (e.g. User typed "cd ~/Desktop" in the terminal; or User selected cell N15 containing the average across WMT benchmark results).
+  - NEVER aggregate across MULTIPLE actions (do NOT aggregate multiple clicks across different elements) 
+- The caption should be a **single user action**, not a sequence of multiple actions.
+  - Do not say "Then the user..." or combine multiple steps into one.
+- Do NOT repeat actions UNLESS the user does different things in between the actions.  
+- Be specific. When possible, mention the name of the application, file name, website, etc.
+  - Otherwise, describe what you see.
+  - If the user clicks on an image, DESCRIBE the contents of the image.
+  - If the user clicks on a cell in a spreadsheet / notebook, DESCRIBE the contents of the cell.
 
 **Examples Captions**:
 
@@ -57,11 +66,9 @@ Using this data, generate a list of higher-level user interactions (called **tas
 - User clicked on the tab titled 'LoRA: Low-Rank Adaptation of Large Language Models - arXiv' in Google Chrome
 - User scrolled through the article titled 'The Perfect Ice Cream: A Summer Recipe Guide' on the New York Times website
 - User scrolled to the bottom of the article 'The Perfect Ice Cream: A Summer Recipe Guide'
-- User clicked on the messaging tab titled 'Team Chat – Product Launch'
-- User scrolled through messages in 'Team Chat – Product Launch'
 - User clicked the tab titled 'analysis.ipynb' in Visual Studio Code
 - User viewed the notebook 'analysis.ipynb' in Visual Studio Code containing code on aggregating interaction data
 - User clicked on cell N15 containing the average across WMT benchmark results
-- User clicked on the fileserver \"ftp://valentin.teutschbein@hpc.sci.hpi.de\" in the recent servers list
+- User clicked on the fileserver "ftp://username@domain" in the recent servers list
 
-Return ONLY the JSON array of tasks. No other text or explanation. Use the same level of detail as in the examples.
+Return ONLY the JSON array of actions. You MUST maintain the same level of detail as in the examples.
