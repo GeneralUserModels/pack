@@ -49,20 +49,7 @@ def format_srt_time(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
 
-def create_annotated_video(video_path, summary_json_path, output_video_path):
-    """Create an annotated video with task captions burned in"""
-
-    print(f"Reading summary from: {summary_json_path}")
-    with open(summary_json_path, 'r') as f:
-        chunks_data = json.load(f)
-
-    all_tasks = []
-    for chunk in chunks_data:
-        if chunk.get('result_type') == 'json' and 'result' in chunk:
-            tasks = chunk['result']
-            if isinstance(tasks, list):
-                all_tasks.extend(tasks)
-
+def create_annotated_video(video_path, all_tasks, output_video_path):
     if not all_tasks:
         print("No valid tasks found in summary file")
         return False
@@ -106,28 +93,31 @@ def create_annotated_video(video_path, summary_json_path, output_video_path):
 
 
 def main():
-    PERCENTILE = 87
-    SESSION = "session_2025-07-17_10-06-32"
-    VIDEO_LENGTH = 180
-
     base_path = Path(__file__).parent.parent / "logs" / SESSION
     video_path = base_path / f"event_logs_video_{PERCENTILE}.mp4"
-    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
+    summary_dir = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}"
     output_video_path = base_path / f"annotated_video_{PERCENTILE}_{VIDEO_LENGTH}.mp4"
 
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
         return
 
-    if not summary_json_path.exists():
-        print(f"Error: Summary JSON file not found: {summary_json_path}")
+    jsons = list(summary_dir.glob("*.json"))
+    if not jsons:
+        print(f"No JSON files found in directory: {summary_dir}")
         return
 
-    print(f"Input video: {video_path}")
-    print(f"Summary JSON: {summary_json_path}")
-    print(f"Output video: {output_video_path}")
+    annotations = []
+    for json_file in jsons:
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)["result"]
+                annotations = annotations + data
+        except json.JSONDecodeError as e:
+            print(f"Error reading JSON file {json_file}: {e}")
+            continue
 
-    success = create_annotated_video(video_path, summary_json_path, output_video_path)
+    success = create_annotated_video(video_path, annotations, output_video_path)
 
     if success:
         print("\n✅ Annotation complete!")
@@ -136,44 +126,8 @@ def main():
         print("\n❌ Annotation failed!")
 
 
-def create_preview_annotations(summary_json_path, max_tasks=10):
-    """Preview the annotations that will be added to the video"""
-    print(f"Reading summary from: {summary_json_path}")
-    with open(summary_json_path, 'r') as f:
-        chunks_data = json.load(f)
-
-    all_tasks = []
-    for chunk in chunks_data:
-        if chunk.get('result_type') == 'json' and 'result' in chunk:
-            tasks = chunk['result']
-            if isinstance(tasks, list):
-                all_tasks.extend(tasks)
-
-    print(f"\nPreview of {min(len(all_tasks), max_tasks)} annotations:")
-    print("-" * 80)
-
-    for i, task in enumerate(all_tasks[:max_tasks]):
-        start = task.get('start', '??:??')
-        end = task.get('end', '??:??')
-        caption = task.get('caption', 'No caption')
-        confidence = task.get('confidence', 'N/A')
-
-        annotation_text = f"{start} - {end}: {caption} | {confidence}"
-        print(f"{i + 1:2d}. {annotation_text}")
-
-    if len(all_tasks) > max_tasks:
-        print(f"... and {len(all_tasks) - max_tasks} more tasks")
-
-    print("-" * 80)
-    print(f"Total tasks to annotate: {len(all_tasks)}")
-
-
 if __name__ == "__main__":
     PERCENTILE = 87
     SESSION = "session_2025-07-17_10-06-32"
-    VIDEO_LENGTH = 180
-    base_path = Path(__file__).parent.parent / "logs" / SESSION
-    summary_json_path = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
-    create_preview_annotations(summary_json_path)
-
+    VIDEO_LENGTH = 60
     main()

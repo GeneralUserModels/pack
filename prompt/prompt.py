@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import codecs
 from pathlib import Path
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -9,12 +8,26 @@ from modules import AggregatedLog
 import subprocess
 import math
 
+
+TASK_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "start": {"type": "string"},
+            "end": {"type": "string"},
+            "caption": {"type": "string"}
+        },
+        "required": ["start", "end", "caption"]
+    }
+}
+
 load_dotenv()
 
 
 def setup_gemini_api(api_key):
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.GenerativeModel('gemini-2.5-pro')
 
 
 def upload_video_file(video_path):
@@ -133,124 +146,41 @@ def adjust_timestamps_in_tasks(tasks, chunk_start_seconds):
     return adjusted_tasks
 
 
-def parse_json_response(response_text):
-    try:
-        response_text = codecs.decode(response_text, "unicode_escape")
-
-        cleaned_text = response_text.strip()
-
-        if cleaned_text.startswith('```json'):
-            cleaned_text = cleaned_text.replace('```json', '', 1).strip()
-        elif cleaned_text.startswith('```'):
-            cleaned_text = cleaned_text.replace('```', '', 1).strip()
-        if cleaned_text.endswith('```'):
-            cleaned_text = cleaned_text[:-3].strip()
-
-        cleaned_text = cleaned_text.strip()
-
-        try:
-            parsed_data = json.loads(cleaned_text)
-
-            if not isinstance(parsed_data, list):
-                parsed_data = [parsed_data]
-
-            return {
-                'success': True,
-                'parsed_data': parsed_data,
-                'raw_text': response_text
-            }
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON: {cleaned_text[:200]}...")
-            print(f"JSON error: {e}")
-            return {
-                'success': False,
-                'parsed_data': None,
-                'raw_text': response_text,
-                'error': str(e)
-            }
-
-    except Exception as e:
-        print(f"Error parsing JSON response: {e}")
-        return {
-            'success': False,
-            'parsed_data': None,
-            'raw_text': response_text,
-            'error': str(e)
-        }
-
-
 def prompt_gemini_with_annotated_video(api_key, video_path, agg_logs, chunk_start_seconds=0):
     try:
         logs_prompt = [a.to_prompt(2 * i) for i, a in enumerate(agg_logs)]
 
-        prompt_template = f"""
-I got this annotated video composed of a series of annotated screenshots, one each second. Thereby the screenshots have annotations baked into them:
-Mouse Interactions
-Click Markers (Circular indicators):
-Red circles: Left mouse button clicks
-Blue circles: Right mouse button clicks
-Green circles: Middle mouse button clicks
-Yellow circles: Other/unknown mouse button clicks
-Each click marker appears as a filled circle with a black outline at the exact location where the mouse click occurred.
-Cursor Movement Annotations
-Movement Arrows:
-Orange arrows: Standard cursor movements during regular interactions
-Magenta arrows: Cursor movements between different interaction sequences or logs
-Lime green dots: Starting positions of cursor movements
-Dark green outline: Border around start position markers
-Arrow Components:
-Line: Shows the path of cursor movement
-Arrowhead: Points to the final position of the cursor
-Start marker: Small lime green circle indicating where the movement began
-Additionally I got a log file, logging all user interactions with the system. They are in MM:SS format corresponding to the video timestamps and list all actions, which are user inputs, in an aggregated form. Keys are delimited by '|' pipe symbol:
-{''.join(logs_prompt)}
-Given this information, please generate a list of higher level user interactions, so called tasks. Each task describes what the user is doing.
-Therefore use this JSON format - return a JSON array of task objects:
+        with open(Path(__file__).parent / "prompt.txt", "r") as f:
+            prompt_template = f.read()
 
-[
-    {{
-        "start": "MM:SS",
-        "end": "MM:SS",
-        "caption": "describe the action the user did, some context, the location and KEEP NAMES! DONT provide information without context, like 'clicked at (200, 300)', instead describe what the user did (e.g. user clicked on 'start search' button). Similarly don't provide raw information for keyboard inputs, so instead of e.g. 'User hold shift and ctrl then pressed left arrow', state what the user did, like 'user selected 7 cells in statistics sheet in analysis excel file'",
-        "confidence": 7
-    }},
-]
-
-Examples of individual task objects:
-[
-    {{
-        "start": "01:12",
-        "end": "01:17",
-        "caption": "typed 'google.com' into the search bar in google chrome",
-        "confidence": 7
-    }},
-    {{
-        "start": "03:15",
-        "end": "03:21",
-        "caption": "Switch to google chrome window displaying LoRA paper",
-        "confidence": 9
-    }},
-    {{
-        "start": "05:12",
-        "end": "05:22",
-        "caption": "Switched to 'analysis.ipynb' notebook in VSCode",
-        "confidence": 6
-    }}
-]
-
-Please return ONLY the JSON array of tasks, no additional text or explanations.
-        """
-
+        prompt_template = prompt_template.replace("{{LOGS}}", ''.join(logs_prompt))
         print("Generating content with Gemini...")
-        print(prompt_template + "...")
         model = setup_gemini_api(api_key)
         video_file = upload_video_file(str(video_path))
         print(f"Video file: {video_file.uri}")
         print(f"Prompt template:\n{agg_logs[0].start_timestamp} - {agg_logs[-1].end_timestamp}")
-        response = model.generate_content([prompt_template, video_file])
-        return response.text
+
+        response = model.generate_content(
+            [prompt_template, video_file],
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=TASK_SCHEMA,
+                temperature=0.0,
+            )
+        )
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            usage = response.usage_metadata
+            print("Token Usage:")
+            print(f"  Input tokens: {usage.prompt_token_count}")
+            print(f"  Output tokens: {usage.candidates_token_count}")
+            print(f"  Total tokens: {usage.total_token_count}")
+        else:
+            print("Token usage information not available")
+        return response
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in Gemini call: {e}")
+        if 'response' in locals() and hasattr(response, 'prompt_feedback'):
+            print(f"Prompt Feedback: {response.prompt_feedback}")
         return None
 
 
@@ -283,61 +213,58 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
             end_chunk = len(video_chunks) - 1
 
         results = []
+
         for i, (video_chunk_path, log_chunk) in enumerate(zip(video_chunks, log_chunks)):
             if i < start_chunk or i > end_chunk:
                 print(f"Skipping chunk {i + 1} (out of range)")
                 continue
-            print(f"\nProcessing chunk {i + 1}/{len(video_chunks)}: {video_chunk_path}")
 
+            print(f"\nProcessing chunk {i + 1}/{len(video_chunks)}: {video_chunk_path}")
             chunk_start_seconds = i * video_length
-            raw_result = prompt_gemini_with_annotated_video(
+
+            response = prompt_gemini_with_annotated_video(
                 api_key,
                 video_chunk_path,
                 log_chunk,
                 chunk_start_seconds
             )
 
-            if raw_result:
-                parsed_result = parse_json_response(raw_result)
-
+            if response:
                 chunk_result_path = chunks_dir / f"chunk_{i:03d}_result.json"
                 chunk_info = {
                     "chunk_index": i,
                     "start_time": seconds_to_mmss(chunk_start_seconds),
-                    "end_time": seconds_to_mmss(chunk_start_seconds + len(log_chunk)),
                     "video_chunk": str(video_chunk_path),
                 }
 
-                if parsed_result['success']:
-                    adjusted_tasks = adjust_timestamps_in_tasks(parsed_result['parsed_data'], chunk_start_seconds)
-
-                    chunk_info["result"] = adjusted_tasks
-                    chunk_info["result_type"] = "json"
-                    print(f"Successfully parsed {len(adjusted_tasks)} JSON task objects")
-
-                    for task in adjusted_tasks[:2]:
-                        print(f"  {task.get('start', '??')} - {task.get('end', '??')}: {task.get('caption', 'No caption')[:100]}")
-                else:
-                    chunk_info["result"] = parsed_result['raw_text']
-                    chunk_info["result_type"] = "text"
-                    chunk_info["error"] = parsed_result.get('error', 'Unknown parsing error')
-                    print("Failed to parse JSON, storing as raw text")
+                try:
+                    result = json.loads(response.text)
+                    result_type = "json"
+                except json.JSONDecodeError:
+                    result = response.text
+                    result_type = "text"
+                try:
+                    adjusted_result = adjust_timestamps_in_tasks(result, chunk_start_seconds)
+                except Exception as e:
+                    print(f"Error adjusting timestamps: {e}")
+                    adjusted_result = result
+                chunk_info["result"] = adjusted_result
+                chunk_info["result_type"] = result_type
 
                 with open(chunk_result_path, "w") as f:
-                    json.dump(chunk_info, f, indent=2)
+                    json.dump(chunk_info, f, indent=2, ensure_ascii=False)
 
                 print(f"Saved chunk result to: {chunk_result_path}")
-                print(f"Chunk {i + 1} response preview:")
-                if parsed_result['success']:
-                    print(f"Parsed {len(adjusted_tasks)} tasks with adjusted timestamps")
-                else:
-                    print(f"Raw text (first 200 chars): {raw_result[:200]}...")
-
                 results.append(chunk_info)
+
             else:
                 print(f"Failed to get response for chunk {i + 1}")
 
         return results
+
+    except Exception as e:
+        print(f"Error processing chunks: {e}")
+        return []
 
     except Exception as e:
         print(f"Error processing chunks: {e}")
@@ -352,7 +279,8 @@ if __name__ == "__main__":
     AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
     SESSION_FOLDER = Path(__file__).parent.parent / "logs" / SESSION
 
-    VIDEO_LENGTH = 180
+    # VIDEO_LENGTH = 180
+    VIDEO_LENGTH = 60
 
     results = process_video_chunks(
         API_KEY,
