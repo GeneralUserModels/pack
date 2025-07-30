@@ -27,7 +27,7 @@ load_dotenv()
 
 def setup_gemini_api(api_key):
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.GenerativeModel('gemini-2.5-pro')
 
 
 def upload_video_file(video_path):
@@ -168,6 +168,14 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_logs, chunk_star
                 temperature=0.0,
             )
         )
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            usage = response.usage_metadata
+            print("Token Usage:")
+            print(f"  Input tokens: {usage.prompt_token_count}")
+            print(f"  Output tokens: {usage.candidates_token_count}")
+            print(f"  Total tokens: {usage.total_token_count}")
+        else:
+            print("Token usage information not available")
         return response
     except Exception as e:
         print(f"Error in Gemini call: {e}")
@@ -244,7 +252,7 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
                 chunk_info["result_type"] = result_type
 
                 with open(chunk_result_path, "w") as f:
-                    json.dump(chunk_info, f, indent=2)
+                    json.dump(chunk_info, f, indent=2, ensure_ascii=False)
 
                 print(f"Saved chunk result to: {chunk_result_path}")
                 results.append(chunk_info)

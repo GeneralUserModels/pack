@@ -1,74 +1,86 @@
-You are an expert-level video analyst specializing in reconstructing user behavior from annotated screen recordings. Your goal is to generate **concise, high-level user actions** based on visual and log data. You must reason about the **user’s intent** across time and provide **detailed yet non-repetitive** action summaries.
+You are an expert video analyst reconstructing **precise low-level user actions** from annotated screen recordings and synchronized user input logs.
 
-I have an annotated video composed of a series of screenshots, one per second, with the following baked-in annotations:
+Your job is to generate **fully detailed captions** describing **exactly what the user did** in each action segment. Use both visual information (screenshots with click and movement annotations) and the aggregated keystroke logs (pipe-delimited, with MM\:SS timestamps) to reconstruct complete actions.
 
-Mouse Interactions
-- **Click Markers (circular indicators)**:
-  - Red circles: Left mouse button clicks
-  - Blue circles: Right mouse button clicks
-  - Green circles: Middle mouse button clicks
-  - Yellow circles: Other/unknown mouse button clicks
-  - Each marker has a black outline and appears at the exact click location
+## Input
 
-Cursor Movement Annotations
-- **Movement Arrows**:
-  - Orange arrows: Regular cursor movements
-  - Magenta arrows: Cursor transitions between different interaction sequences/logs
-  - Lime green dots with dark green outline: Starting positions of cursor movements
-- **Arrow Components**:
-  - Line: Cursor path
-  - Arrowhead: Final cursor position
-  - Start marker: Small lime green circle at movement start
+* A sequence of 1-second annotated screenshots with:
 
-Additionally, I have a log file listing all user inputs in MM:SS format matching the video timestamps. Keys are delimited by a pipe symbol (`|`):
+  * **Click markers** (colored circles for different mouse buttons)
+  * **Cursor movement arrows** (showing direction and sequence of interactions)
+* A pipe-delimited log of user input events (MM\:SS format)
 
-## Logs
+## Output
+
+A JSON array of objects:
+
+```json
+[
+  {
+    "start": "MM:SS",
+    "end":   "MM:SS",
+    "caption": "..."
+  }
+]
+```
+
+Only return this array.
+
+---
+
+## Rules
+
+1. **Fully reconstruct text and commands**
+
+   - Always state the **entire typed or pasted string**.
+   - Never stop at intermediate steps (e.g. "pressed Up arrow") unless the result is known. Instead, **describe the final command shown or executed**.
+
+2. **Atomic actions only**
+
+   - Each caption must cover **exactly one** user interaction (e.g. window switch, application launch, menu click).
+   - Do **not** combine multiple distinct interactions (e.g. switching windows **and** clicking in one caption).
+
+3. **Contextualize file and object names**
+
+   - Add context to folder names, spreadsheet cells, etc.
+     (e.g. *"the 'Downloads' folder containing installer files"* or *"cell I2 labeled 'car model'"*).
+
+4. **Disallow vague actions**
+
+   - Never use vague phrases like *"edits text"*, *"clicks folder"*, or *"opens a terminal"* without clarifying **what** was edited/clicked/opened **and what it contained**.
+
+5. **Merge repeated identical actions**
+
+   - If the same object is clicked or interacted with repeatedly with no change or intermediate action, **merge them into one action** with a wider start–end interval.
+
+6. **Name all objects interacted with**
+
+   - Identify folders, files, UI elements, spreadsheet cells (with values and labels), browser fields, etc.
+   - Include **visible labels or contents** of buttons, menu items, folders, etc.
+
+7. **No speculation or intent**
+
+   - Only describe what is visibly and provably done. Never guess intentions or goals.
+
+8. **Ignore technical rendering details**
+
+   - Do not mention coordinates, cursor path shapes, or raw keycodes.
+
+---
+
+## Strong Captions Should Look Like This
+
+- Switched from the terminal window to the desktop.
+- Switched from the desktop to the Google Chrome window.
+- Opened the System Settings application.
+- Clicked the “Network” tab in the Settings sidebar.
+- Typed `openai office munich` into the Google search bar and pressed Enter.
+- Ran `cd /home/user/projects/gs-utils` in the terminal to navigate to the Gaussian Splatting folder.
+- Deleted the text `hyundai i30` from cell I2, which contains the price category for the Volvo car.
+- Clicked the "Downloads" folder in the sidebar, which contains three `.deb` files and an installer script.
+
+---
+
+Insert your JSON array below. Do not return any other explanation or text.
 
 {{LOGS}}
-
-## Task
-
-Using this data, generate a list of higher-level user actions that describe what the user is doing.
-
-**Output format**: Return a JSON array of action objects in this exact structure:
-
-[
-    {
-        "start": "MM:SS",
-        "end": "MM:SS",
-        "caption": "Describe the user’s action with context and names."
-    }
-]
-
-## Guidelines
-
-- NEVER generate captions with coordinates or partial key presses or commands 
-  - (e.g. NEVER say User typed "p" or User clicked on coordinate X, Y).
-- Carefully aggregate across timestamps / screenshots to provide a description of the user’s single action. 
-  - (e.g. User typed "cd ~/Desktop" in the terminal; or User selected cell N15 containing the average across WMT benchmark results).
-  - NEVER aggregate across MULTIPLE actions (do NOT aggregate multiple clicks across different elements) 
-- The caption should be a **single user action**, not a sequence of multiple actions.
-  - Do not say "Then the user..." or combine multiple steps into one.
-- Do NOT repeat actions UNLESS the user does different things in between the actions.  
-- Be specific. When possible, mention the name of the application, file name, website, etc.
-  - Otherwise, describe what you see.
-  - If the user clicks on an image, DESCRIBE the contents of the image.
-  - If the user clicks on a cell in a spreadsheet / notebook, DESCRIBE the contents of the cell.
-
-**Examples Captions**:
-
-- User double-clicked the 'Google Chrome' shortcut on the desktop
-- User typed 'google.com' into the address bar and pressed Enter
-- User typed 'best budget noise cancelling headphones 2024' into the Google search bar
-- User scrolled through Google search results for 'best budget noise cancelling headphones 2024'
-- User clicked on the second image result showing a pair of over-ear black and silver headphones in Google Images
-- User viewed the notebook 'analysis.ipynb' in Visual Studio Code containing code on aggregating interaction data
-- User clicked on the tab titled 'LoRA: Low-Rank Adaptation of Large Language Models - arXiv' in Google Chrome
-- User scrolled through the article titled 'The Perfect Ice Cream: A Summer Recipe Guide' on the New York Times website
-- User scrolled to the bottom of the article 'The Perfect Ice Cream: A Summer Recipe Guide'
-- User clicked the tab titled 'analysis.ipynb' in Visual Studio Code
-- User viewed the notebook 'analysis.ipynb' in Visual Studio Code containing code on aggregating interaction data
-- User clicked on cell N15 containing the average across WMT benchmark results
-- User clicked on the fileserver "ftp://username@domain" in the recent servers list
-
-Return ONLY the JSON array of actions. You MUST maintain the same level of detail as in the examples.
