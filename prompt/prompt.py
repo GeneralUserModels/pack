@@ -266,15 +266,12 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
         print(f"Error processing chunks: {e}")
         return []
 
-    except Exception as e:
-        print(f"Error processing chunks: {e}")
-        return []
 
 
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
-    PERCENTILE = 87
-    SESSION = "session_2025-07-17_10-06-32"
+    PERCENTILE = 85
+    SESSION = "session_2025-08-03_19-47-07"
     VIDEO_PATH = Path(__file__).parent.parent / "logs" / SESSION / f"event_logs_video_{PERCENTILE}.mp4"
     AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
     SESSION_FOLDER = Path(__file__).parent.parent / "logs" / SESSION
