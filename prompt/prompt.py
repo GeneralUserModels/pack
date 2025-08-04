@@ -7,6 +7,8 @@ import google.generativeai as genai
 from modules import AggregatedLog
 import subprocess
 import math
+import multiprocessing as mp
+from functools import partial
 
 
 TASK_SCHEMA = {
@@ -184,7 +186,82 @@ def prompt_gemini_with_annotated_video(api_key, video_path, agg_logs, chunk_star
         return None
 
 
-def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, session_folder=None, percentile=90, start_chunk=0, end_chunk=None):
+def process_single_chunk(chunk_data, api_key, chunks_dir, video_length):
+    """Process a single video chunk - this function will be called by worker processes"""
+    i, video_chunk_path, log_chunk = chunk_data
+
+    # Check if chunk already processed
+    chunk_result_path = chunks_dir / f"chunk_{i:03d}_result.json"
+    if chunk_result_path.exists():
+        print(f"Chunk {i + 1} already processed, skipping...")
+        return None
+
+    print(f"Processing chunk {i + 1}: {video_chunk_path}")
+    chunk_start_seconds = i * video_length
+
+    try:
+        response = prompt_gemini_with_annotated_video(
+            api_key,
+            video_chunk_path,
+            log_chunk,
+            chunk_start_seconds
+        )
+
+        if response:
+            chunk_info = {
+                "chunk_index": i,
+                "start_time": seconds_to_mmss(chunk_start_seconds),
+                "video_chunk": str(video_chunk_path),
+            }
+
+            try:
+                result = json.loads(response.text)
+                result_type = "json"
+            except json.JSONDecodeError:
+                result = response.text
+                result_type = "text"
+
+            try:
+                adjusted_result = adjust_timestamps_in_tasks(result, chunk_start_seconds)
+            except Exception as e:
+                print(f"Error adjusting timestamps for chunk {i + 1}: {e}")
+                adjusted_result = result
+
+            chunk_info["result"] = adjusted_result
+            chunk_info["result_type"] = result_type
+
+            with open(chunk_result_path, "w") as f:
+                json.dump(chunk_info, f, indent=2, ensure_ascii=False)
+
+            print(f"Saved chunk result to: {chunk_result_path}")
+            return chunk_info
+        else:
+            print(f"Failed to get response for chunk {i + 1}")
+            return None
+
+    except Exception as e:
+        print(f"Error processing chunk {i + 1}: {e}")
+        return None
+
+
+def process_video_chunks(
+    api_key,
+    video_path,
+    agg_json_path,
+    video_length=180,
+    session_folder=None,
+    percentile=90,
+    start_chunk=0,
+    end_chunk=None,
+    chunks_dir=None,
+    num_workers=1
+):
+    if session_folder is None:
+        session_folder = video_path.parent
+    if chunks_dir is None:
+        chunks_dir = Path(session_folder) / f"chunks_{percentile}_{video_length}"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+
     try:
         with open(agg_json_path, "r") as f:
             logs_data = json.load(f)
@@ -198,73 +275,48 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
                 print(result)
             return [result] if result else []
 
-        if session_folder is None:
-            session_folder = video_path.parent
-        chunks_dir = Path(session_folder) / f"chunks_{percentile}_{video_length}"
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-
         print(f"Splitting video into {video_length}-second chunks...")
         video_chunks = split_video(video_path, chunks_dir, video_length)
-
         print("Splitting logs into chunks...")
         log_chunks = split_logs(agg_logs, video_length)
 
         if end_chunk is None:
             end_chunk = len(video_chunks) - 1
 
+        chunk_data = []
+        for i, (video_chunk_path, log_chunk) in enumerate(zip(video_chunks, log_chunks)):
+            if start_chunk <= i <= end_chunk:
+                chunk_data.append((i, video_chunk_path, log_chunk))
+
+        if not chunk_data:
+            print("No chunks to process in the specified range.")
+            return []
+
+        print(f"Processing {len(chunk_data)} chunks with {num_workers} worker(s)...")
+
         results = []
 
-        for i, (video_chunk_path, log_chunk) in enumerate(zip(video_chunks, log_chunks)):
-            if i < start_chunk or i > end_chunk:
-                print(f"Skipping chunk {i + 1} (out of range)")
-                continue
+        if num_workers == 1:
+            for data in chunk_data:
+                result = process_single_chunk(data, api_key, chunks_dir, video_length)
+                if result:
+                    results.append(result)
+        else:
+            if num_workers is None:
+                num_workers = mp.cpu_count()
 
-            print(f"\nProcessing chunk {i + 1}/{len(video_chunks)}: {video_chunk_path}")
-            chunk_start_seconds = i * video_length
+            process_func = partial(process_single_chunk,
+                                   api_key=api_key,
+                                   chunks_dir=chunks_dir,
+                                   video_length=video_length)
 
-            response = prompt_gemini_with_annotated_video(
-                api_key,
-                video_chunk_path,
-                log_chunk,
-                chunk_start_seconds
-            )
+            with mp.Pool(processes=num_workers) as pool:
+                chunk_results = pool.map(process_func, chunk_data)
 
-            if response:
-                chunk_result_path = chunks_dir / f"chunk_{i:03d}_result.json"
-                chunk_info = {
-                    "chunk_index": i,
-                    "start_time": seconds_to_mmss(chunk_start_seconds),
-                    "video_chunk": str(video_chunk_path),
-                }
+                results = [result for result in chunk_results if result is not None]
 
-                try:
-                    result = json.loads(response.text)
-                    result_type = "json"
-                except json.JSONDecodeError:
-                    result = response.text
-                    result_type = "text"
-                try:
-                    adjusted_result = adjust_timestamps_in_tasks(result, chunk_start_seconds)
-                except Exception as e:
-                    print(f"Error adjusting timestamps: {e}")
-                    adjusted_result = result
-                chunk_info["result"] = adjusted_result
-                chunk_info["result_type"] = result_type
-
-                with open(chunk_result_path, "w") as f:
-                    json.dump(chunk_info, f, indent=2, ensure_ascii=False)
-
-                print(f"Saved chunk result to: {chunk_result_path}")
-                results.append(chunk_info)
-
-            else:
-                print(f"Failed to get response for chunk {i + 1}")
-
+        print(f"Successfully processed {len(results)} chunks")
         return results
-
-    except Exception as e:
-        print(f"Error processing chunks: {e}")
-        return []
 
     except Exception as e:
         print(f"Error processing chunks: {e}")
@@ -274,12 +326,12 @@ def process_video_chunks(api_key, video_path, agg_json_path, video_length=180, s
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
     PERCENTILE = 87
-    SESSION = "session_2025-07-17_10-06-32"
+    # SESSION = "session_2025-07-17_10-06-32"
+    SESSION = "session_2025-07-11_02-51-30-768112"
     VIDEO_PATH = Path(__file__).parent.parent / "logs" / SESSION / f"event_logs_video_{PERCENTILE}.mp4"
     AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
     SESSION_FOLDER = Path(__file__).parent.parent / "logs" / SESSION
 
-    # VIDEO_LENGTH = 180
     VIDEO_LENGTH = 60
 
     results = process_video_chunks(

@@ -1,0 +1,123 @@
+{
+  "chunk_index": 4,
+  "start_time": "04:00",
+  "video_chunk": "/home/valteu/research/pack/prompting_benchmark/data/chunks_85_60_1/chunk_004.mp4",
+  "result": [
+    {
+      "caption": "Double-clicked the \"new\" folder in the \"Documents\" directory to open it.",
+      "end": "04:01",
+      "start": "04:00"
+    },
+    {
+      "caption": "Selected the file \"preprocessing_metrics.csv\" in the \"new\" folder.",
+      "end": "04:03",
+      "start": "04:02"
+    },
+    {
+      "caption": "Pasted the file \"best_rougel_scores.csv\" into the \"new\" folder.",
+      "end": "04:04",
+      "start": "04:04"
+    },
+    {
+      "caption": "Opened the file \"best_rougel_scores.csv\" in a spreadsheet application.",
+      "end": "04:05",
+      "start": "04:04"
+    },
+    {
+      "caption": "Switched from the spreadsheet application to the Google Chrome window showing a ChatGPT conversation.",
+      "end": "04:19",
+      "start": "04:18"
+    },
+    {
+      "caption": "Opened Google Sheets in a new tab.",
+      "end": "04:21",
+      "start": "04:20"
+    },
+    {
+      "caption": "Clicked to open the \"bp_lora_benchmark\" spreadsheet from the Google Sheets home page.",
+      "end": "04:24",
+      "start": "04:22"
+    },
+    {
+      "caption": "Clicked on cell I2 in the \"Merging\" sheet.",
+      "end": "04:25",
+      "start": "04:24"
+    },
+    {
+      "caption": "Typed \"sleep\" into cell I2 and then deleted it.",
+      "end": "04:27",
+      "start": "04:26"
+    },
+    {
+      "caption": "Clicked on cell N18.",
+      "end": "04:29",
+      "start": "04:28"
+    },
+    {
+      "caption": "Pasted data into cell N18, creating a new table with headers \"subdirectory\" and \"best_rouge_fmeasure\".",
+      "end": "04:32",
+      "start": "04:30"
+    },
+    {
+      "caption": "Scrolled horizontally to review the newly pasted data.",
+      "end": "04:35",
+      "start": "04:32"
+    },
+    {
+      "caption": "Clicked on cell A1, which contains \"dataset | adapter\".",
+      "end": "04:37",
+      "start": "04:36"
+    },
+    {
+      "caption": "Edited cell A1 to change its content from \"dataset | adapter\" to \"Unbalanced\".",
+      "end": "04:41",
+      "start": "04:38"
+    },
+    {
+      "caption": "Clicked on the empty cell I2.",
+      "end": "04:43",
+      "start": "04:42"
+    },
+    {
+      "caption": "Started typing in cell I2, then clicked on cell N18, cancelling the edit.",
+      "end": "04:45",
+      "start": "04:44"
+    },
+    {
+      "caption": "Used the down arrow key to navigate from cell N18 (\"subdirectory\") to cell N21 (\"lora_soups_rig_math\").",
+      "end": "04:49",
+      "start": "04:46"
+    },
+    {
+      "caption": "Moved selection to cell O21, containing \"0.144688695\", and copied its content.",
+      "end": "04:51",
+      "start": "04:50"
+    },
+    {
+      "caption": "Clicked on the empty cell J6.",
+      "end": "04:53",
+      "start": "04:52"
+    },
+    {
+      "caption": "Used the up arrow key to move the selection to cell J5.",
+      "end": "04:55",
+      "start": "04:54"
+    },
+    {
+      "caption": "Clicked on cell O25, which contains the value \"0.3587143452\".",
+      "end": "04:57",
+      "start": "04:56"
+    },
+    {
+      "caption": "Used the left arrow key to move the selection from cell O25 to N25.",
+      "end": "04:58",
+      "start": "04:58"
+    },
+    {
+      "caption": "Clicked on cell J5.",
+      "end": "05:00",
+      "start": "04:58"
+    }
+  ],
+  "result_type": "json"
+}

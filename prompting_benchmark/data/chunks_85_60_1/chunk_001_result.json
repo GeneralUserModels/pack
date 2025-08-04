@@ -1,0 +1,83 @@
+{
+  "chunk_index": 1,
+  "start_time": "01:00",
+  "video_chunk": "/home/valteu/research/pack/prompting_benchmark/data/chunks_85_60_1/chunk_001.mp4",
+  "result": [
+    {
+      "caption": "Switched from the terminal window showing `squeue` output to a multi-pane tmux session.",
+      "end": "01:02",
+      "start": "01:00"
+    },
+    {
+      "caption": "Switched from the multi-pane tmux session back to the terminal window showing `squeue` output.",
+      "end": "01:04",
+      "start": "01:03"
+    },
+    {
+      "caption": "Switched from the terminal window showing `squeue` output to the multi-pane tmux session.",
+      "end": "01:10",
+      "start": "01:08"
+    },
+    {
+      "caption": "Clicked in the bottom-right terminal pane.",
+      "end": "01:22",
+      "start": "01:20"
+    },
+    {
+      "caption": "Ran the command `cat job_batch.sh` in the terminal to display the contents of the script.",
+      "end": "01:28",
+      "start": "01:24"
+    },
+    {
+      "caption": "Ran the command `cd lora-soups` in the terminal to navigate into the `lora-soups` directory.",
+      "end": "01:29",
+      "start": "01:28"
+    },
+    {
+      "caption": "Ran the command `ls` in the terminal to list the contents of the `lora-soups` directory.",
+      "end": "01:32",
+      "start": "01:29"
+    },
+    {
+      "caption": "Ran the command `cd lora-soups` in the terminal.",
+      "end": "01:34",
+      "start": "01:32"
+    },
+    {
+      "caption": "Ran the command `ls` in the terminal to list the contents of the `lora-soups` directory.",
+      "end": "01:37",
+      "start": "01:34"
+    },
+    {
+      "caption": "Ran the command `cd lora_soups_merging_datasets_balanced_m` in the terminal to navigate into the directory.",
+      "end": "01:41",
+      "start": "01:37"
+    },
+    {
+      "caption": "Ran the command `ls` in the terminal to list the contents of the current directory.",
+      "end": "01:43",
+      "start": "01:41"
+    },
+    {
+      "caption": "Ran the command `cd ..` in the terminal to navigate to the parent directory.",
+      "end": "01:45",
+      "start": "01:43"
+    },
+    {
+      "caption": "Ran the command `ls` in the terminal to list the contents of the current directory.",
+      "end": "01:48",
+      "start": "01:45"
+    },
+    {
+      "caption": "Ran the command `cd soups_adapters` in the terminal to navigate into the `soups_adapters` directory.",
+      "end": "01:51",
+      "start": "01:48"
+    },
+    {
+      "caption": "Ran the command `ls` in the terminal to list the contents of the `soups_adapters` directory.",
+      "end": "01:53",
+      "start": "01:51"
+    }
+  ],
+  "result_type": "json"
+}

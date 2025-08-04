@@ -1,0 +1,128 @@
+{
+  "chunk_index": 0,
+  "start_time": "00:00",
+  "video_chunk": "/home/valteu/research/pack/prompting_benchmark/data/chunks_85_60_1/chunk_000.mp4",
+  "result": [
+    {
+      "caption": "Switched from the terminal window to the desktop.",
+      "end": "00:02",
+      "start": "00:00"
+    },
+    {
+      "caption": "Switched from the desktop to the Google Chrome window.",
+      "end": "00:08",
+      "start": "00:06"
+    },
+    {
+      "caption": "Switched from the Google Chrome window to the terminal.",
+      "end": "00:10",
+      "start": "00:08"
+    },
+    {
+      "caption": "Opened the System Settings application.",
+      "end": "00:11",
+      "start": "00:10"
+    },
+    {
+      "caption": "Clicked the 'Network' tab in the Settings sidebar.",
+      "end": "00:12",
+      "start": "00:11"
+    },
+    {
+      "caption": "Clicked the settings icon for the 'SC_User' VPN connection.",
+      "end": "00:14",
+      "start": "00:12"
+    },
+    {
+      "caption": "Clicked the arrow icon to open the Proxy settings.",
+      "end": "00:16",
+      "start": "00:14"
+    },
+    {
+      "caption": "Switched from the System Settings window to the Google Chrome window.",
+      "end": "00:18",
+      "start": "00:16"
+    },
+    {
+      "caption": "Typed `openai office munich` into the Google search bar and pressed Enter.",
+      "end": "00:20",
+      "start": "00:18"
+    },
+    {
+      "caption": "Clicked the search result link 'OpenAI Deutschland'.",
+      "end": "00:22",
+      "start": "00:20"
+    },
+    {
+      "caption": "Clicked the 'Images' tab on the Google search results page.",
+      "end": "00:24",
+      "start": "00:22"
+    },
+    {
+      "caption": "Clicked an image result showing an office building with an 'OpenAI' sign.",
+      "end": "00:26",
+      "start": "00:24"
+    },
+    {
+      "caption": "Clicked an image result showing an office interior with the text 'ChatGPT-Mutter eröffnet erstes deutsches Büro in München'.",
+      "end": "00:28",
+      "start": "00:26"
+    },
+    {
+      "caption": "Clicked an image result showing an office interior with a staircase.",
+      "end": "00:30",
+      "start": "00:28"
+    },
+    {
+      "caption": "Scrolled down the Google Images results page.",
+      "end": "00:32",
+      "start": "00:30"
+    },
+    {
+      "caption": "Switched from the Google Chrome window to the terminal.",
+      "end": "00:34",
+      "start": "00:32"
+    },
+    {
+      "caption": "Recalled the previous command `valentin.teutschbein@lxb01-s run` in the terminal.",
+      "end": "00:36",
+      "start": "00:34"
+    },
+    {
+      "caption": "Switched from the terminal to the 'OpenAI Deutschland' tab in Google Chrome.",
+      "end": "00:38",
+      "start": "00:36"
+    },
+    {
+      "caption": "Switched from Google Chrome to the terminal.",
+      "end": "00:40",
+      "start": "00:38"
+    },
+    {
+      "caption": "Switched from the terminal to the Google Chrome new tab page.",
+      "end": "00:42",
+      "start": "00:40"
+    },
+    {
+      "caption": "Ran the command `valentin.teutschbein@lxb04-s tstart` in the terminal.",
+      "end": "00:46",
+      "start": "00:42"
+    },
+    {
+      "caption": "Switched from the terminal to the desktop.",
+      "end": "00:48",
+      "start": "00:46"
+    },
+    {
+      "caption": "Ran the command `srum --partition gpu-interactive --account=sci-herbrich --cpus-per-task=16 --gpus=1 --nodelist gx29 --mem=32G --time=08:00:00 --pty bash` in a new terminal window.",
+      "end": "00:52",
+      "start": "00:50"
+    },
+    {
+      "caption": "Ran the command `lora-bpf tstart` in the terminal.",
+      "end": "00:56",
+      "start": "00:52"
+    }
+  ],
+  "result_type": "json"
+}

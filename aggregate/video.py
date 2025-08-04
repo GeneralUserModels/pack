@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import tempfile
 import argparse
+from modules import AggregatedLog
 
 BORDER_WIDTH = 10
 CLICK_MARKER_RADIUS = 8
@@ -308,6 +309,7 @@ def visualize_log(log: dict, index: int, out_dir: Path, prev_end_cursor=None, ta
 
 def convert_to_video(logs, video_name, video_dir, should_annotate=True, seconds_per_frame=1, percentile=95):
     print("Finding maximum dimensions from all screenshots...")
+    print(logs[0])
     max_width, max_height = get_max_dimensions_from_logs(logs)
     print(f"Maximum dimensions: {max_width}x{max_height}")
 
@@ -444,6 +446,7 @@ def main():
         return
 
     logs = json.loads(input_json.read_text())
+    logs = [AggregatedLog.from_dict(log) for log in logs]
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Processing {len(logs)} logs in {args.mode} mode")
@@ -457,9 +460,8 @@ def main():
 
 if __name__ == '__main__':
 
-    PERCENTILE = 95
+    PERCENTILE = 85
 
-    SESSION = 'session_2025-07-13_15-59-04-565176'
-    AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
-    OUTPUT_DIR = Path(__file__).parent.parent / "logs" / SESSION / f'agg_{PERCENTILE}_visualizations'
+    AGG_JSON = Path(__file__).parent.parent / "prompting_benchmark" / "data" / f'aggregated_logs_{PERCENTILE}.json'
+    OUTPUT_DIR = Path(__file__).parent.parent / "prompting_benchmark" / "data" / f'agg_{PERCENTILE}_visualizations'
     main()

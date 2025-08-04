@@ -30,9 +30,8 @@ def create_subtitle_file(tasks, output_path):
             start_seconds = mmss_to_seconds(task['start'])
             end_seconds = mmss_to_seconds(task['end'])
             caption = task['caption']
-            confidence = task.get('confidence', 'N/A')
 
-            subtitle_text = f"{task['start']} - {task['end']}: {caption} | {confidence}"
+            subtitle_text = f"{task['start']} - {task['end']}: {caption}"
 
             f.write(f"{subtitle_index}\n")
             f.write(f"{format_srt_time(start_seconds)} --> {format_srt_time(end_seconds)}\n")
@@ -92,17 +91,13 @@ def create_annotated_video(video_path, all_tasks, output_video_path):
             print(f"Error cleaning up temporary file: {e}")
 
 
-def main():
-    base_path = Path(__file__).parent.parent / "logs" / SESSION
-    video_path = base_path / f"event_logs_video_{PERCENTILE}.mp4"
-    summary_dir = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}"
-    output_video_path = base_path / f"annotated_video_{PERCENTILE}_{VIDEO_LENGTH}.mp4"
+def label_video_with_captions(video_path, summary_dir, output_video_path):
 
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
         return
 
-    jsons = list(summary_dir.glob("*.json"))
+    jsons = list(summary_dir.glob("*_result.json"))
     if not jsons:
         print(f"No JSON files found in directory: {summary_dir}")
         return
@@ -130,4 +125,8 @@ if __name__ == "__main__":
     PERCENTILE = 87
     SESSION = "session_2025-07-17_10-06-32"
     VIDEO_LENGTH = 60
-    main()
+    base_path = Path(__file__).parent.parent / "logs" / SESSION
+    video_path = base_path / f"event_logs_video_{PERCENTILE}.mp4"
+    summary_dir = base_path / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}"
+    output_video_path = base_path / f"annotated_video_{PERCENTILE}_{VIDEO_LENGTH}.mp4"
+    label_video_with_captions(video_path, summary_dir, output_video_path)
