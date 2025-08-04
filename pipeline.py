@@ -48,9 +48,9 @@ def get_session_choice(sessions):
 def get_percentile():
     while True:
         try:
-            percentile = input("\nEnter percentile (default 95): ").strip()
+            percentile = input("\nEnter percentile (default 85): ").strip()
             if not percentile:
-                return 95
+                return 85
             value = int(percentile)
             if 1 <= value <= 100:
                 return value
@@ -66,7 +66,7 @@ def show_actions_menu():
     print("2. Plot raw logs")
     print("3. Convert to video")
     print("4. Visualize images")
-    print("5. Set percentile (default 95)")
+    print("5. Set percentile (default 85)")
     print("\nYou can select multiple actions (e.g., '134' for actions 1, 3, and 4)")
 
 
@@ -94,9 +94,9 @@ def get_num_workers(num_sessions):
             print("Please enter a valid number")
     while True:
         try:
-            percentile = input("\nEnter percentile (default 95): ").strip()
+            percentile = input("\nEnter percentile (default 85): ").strip()
             if not percentile:
-                return 95
+                return 85
             value = int(percentile)
             if 1 <= value <= 100:
                 return value
@@ -259,7 +259,7 @@ def main():
     show_actions_menu()
     actions = get_actions_choice()
 
-    percentile = 95
+    percentile = 85
     if 5 in actions:
         percentile = get_percentile()
         actions = [a for a in actions if a != 5]
