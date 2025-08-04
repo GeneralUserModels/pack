@@ -105,7 +105,7 @@ def main():
 
     print(f"Processing session: {chunks_dir.name}")
     results = prompt_one_chunk(API_KEY, PERCENTILE, VIDEO_LENGTH, chunks_dir)
-    prompt_file = Path(__file__).parent.parent / "prompt.txt"
+    prompt_file = Path(__file__).parent.parent / "prompt" / "prompt.txt"
     if prompt_file.exists():
         with open(prompt_file, "r") as f:
             prompt_content = f.read()

@@ -116,7 +116,7 @@ def label_video_with_captions(video_path, summary_dir, output_video_path):
 
     if success:
         print("\n✅ Annotation complete!")
-        print("📹 Annotated video saved to: {output_video_path}")
+        print(f"📹 Annotated video saved to: {output_video_path}")
     else:
         print("\n❌ Annotation failed!")
 
