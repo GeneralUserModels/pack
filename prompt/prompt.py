@@ -10,7 +10,6 @@ import math
 import multiprocessing as mp
 from functools import partial
 
-
 TASK_SCHEMA = {
     "type": "array",
     "items": {
@@ -151,8 +150,9 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
         output_path = output_dir / f"chunk_{i:03d}.mp4"
 
         cmd = [
-            'ffmpeg', '-i', str(video_path),
+            'ffmpeg',
             '-ss', str(start_time),
+            '-i', str(video_path),
             '-t', str(chunk_duration_seconds),
             '-c', 'copy',
             '-avoid_negative_ts', 'make_zero',
@@ -168,7 +168,7 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
             continue
 
         chunk_paths.append(output_path)
-
+    
     return chunk_paths
 
 
