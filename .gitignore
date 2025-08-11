@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 .DS_Store
+*.zip
+
+# Exclude all of prompting_benchmark/data/ except chunks_85_60_1 and screenshots
+prompting_benchmark/data/*
+!prompting_benchmark/data/chunks_85_60_1/
+!prompting_benchmark/data/screenshots/
 
 # C extensions
 *.so

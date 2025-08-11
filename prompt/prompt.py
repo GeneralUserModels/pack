@@ -10,7 +10,6 @@ import math
 import multiprocessing as mp
 from functools import partial
 
-
 TASK_SCHEMA = {
     "type": "array",
     "items": {
@@ -25,6 +24,85 @@ TASK_SCHEMA = {
 }
 
 load_dotenv()
+
+
+def get_available_sessions(logs_dir="logs"):
+    """Get list of available sessions from the logs directory."""
+    logs_path = Path(__file__).parent.parent / logs_dir
+    if not logs_path.exists():
+        print(f"Logs directory not found: {logs_path}")
+        return []
+    
+    sessions = []
+    for item in logs_path.iterdir():
+        if item.is_dir() and item.name.startswith("session_"):
+            sessions.append(item.name)
+    
+    return sorted(sessions)
+
+
+def display_session_options(sessions):
+    """Display available sessions as numbered options."""
+    if not sessions:
+        print("No sessions found in logs directory.")
+        return None
+    
+    print("\nAvailable sessions:")
+    for i, session in enumerate(sessions, 1):
+        print(f"{i}. {session}")
+    
+    while True:
+        try:
+            choice = input(f"\nSelect a session (1-{len(sessions)}): ")
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(sessions):
+                return sessions[choice_idx]
+            else:
+                print(f"Please enter a number between 1 and {len(sessions)}")
+        except ValueError:
+            print("Please enter a valid number")
+
+
+def get_available_percentiles(session_folder):
+    """Get list of available percentiles from video files in the session directory."""
+    session_path = Path(session_folder)
+    if not session_path.exists():
+        print(f"Session directory not found: {session_path}")
+        return []
+    
+    percentiles = []
+    for item in session_path.iterdir():
+        if item.is_file() and item.name.startswith("event_logs_video_") and item.name.endswith(".mp4"):
+            # Extract percentile from filename like "event_logs_video_87.mp4"
+            try:
+                percentile = int(item.name.replace("event_logs_video_", "").replace(".mp4", ""))
+                percentiles.append(percentile)
+            except ValueError:
+                continue
+    
+    return sorted(percentiles)
+
+
+def display_percentile_options(percentiles):
+    """Display available percentiles as numbered options."""
+    if not percentiles:
+        print("No video files found in session directory.")
+        return None
+    
+    print("\nAvailable percentiles:")
+    for i, percentile in enumerate(percentiles, 1):
+        print(f"{i}. {percentile}%")
+    
+    while True:
+        try:
+            choice = input(f"\nSelect a percentile (1-{len(percentiles)}): ")
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(percentiles):
+                return percentiles[choice_idx]
+            else:
+                print(f"Please enter a number between 1 and {len(percentiles)}")
+        except ValueError:
+            print("Please enter a valid number")
 
 
 def setup_gemini_api(api_key):
@@ -72,8 +150,9 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
         output_path = output_dir / f"chunk_{i:03d}.mp4"
 
         cmd = [
-            'ffmpeg', '-i', str(video_path),
+            'ffmpeg',
             '-ss', str(start_time),
+            '-i', str(video_path),
             '-t', str(chunk_duration_seconds),
             '-c', 'copy',
             '-avoid_negative_ts', 'make_zero',
@@ -89,7 +168,7 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
             continue
 
         chunk_paths.append(output_path)
-
+    
     return chunk_paths
 
 
@@ -325,12 +404,23 @@ def process_video_chunks(
 
 if __name__ == "__main__":
     API_KEY = os.getenv("GEMINI_API_KEY")
-    PERCENTILE = 87
-    # SESSION = "session_2025-07-17_10-06-32"
-    SESSION = "session_2025-07-11_02-51-30-768112"
-    VIDEO_PATH = Path(__file__).parent.parent / "logs" / SESSION / f"event_logs_video_{PERCENTILE}.mp4"
-    AGG_JSON = Path(__file__).parent.parent / "logs" / SESSION / f'aggregated_logs_{PERCENTILE}.json'
-    SESSION_FOLDER = Path(__file__).parent.parent / "logs" / SESSION
+    sessions = get_available_sessions()
+    selected_session = display_session_options(sessions)
+
+    if not selected_session:
+        print("No session selected. Exiting.")
+        exit()
+    
+    SESSION_FOLDER = Path(__file__).parent.parent / "logs" / selected_session
+    video_files = get_available_percentiles(SESSION_FOLDER)
+    selected_percentile = display_percentile_options(video_files)
+
+    if not selected_percentile:
+        print("No percentile selected. Exiting.")
+        exit()
+    
+    VIDEO_PATH = SESSION_FOLDER / f"event_logs_video_{selected_percentile}.mp4"
+    AGG_JSON = SESSION_FOLDER / f'aggregated_logs_{selected_percentile}.json'
 
     VIDEO_LENGTH = 60
 
@@ -340,16 +430,16 @@ if __name__ == "__main__":
         AGG_JSON,
         video_length=VIDEO_LENGTH,
         session_folder=SESSION_FOLDER,
-        percentile=PERCENTILE
+        percentile=selected_percentile
     )
 
-    if results:
-        print(f"\nProcessed {len(results)} chunks successfully")
-
-        summary_path = SESSION_FOLDER / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(summary_path, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Summary saved to: {summary_path}")
-    else:
+    if not results:
         print("No chunks processed successfully")
+        exit()
+
+    print(f"\nProcessed {len(results)} chunks successfully")
+    summary_path = SESSION_FOLDER / f"chunks_{selected_percentile}_{VIDEO_LENGTH}" / "all_chunks_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(summary_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Summary saved to: {summary_path}")
