@@ -1,6 +1,7 @@
 import json
 import random
 import math
+import argparse
 from pathlib import Path
 from typing import List, Dict, Any
 from datasets import Dataset, DatasetDict, Features, Value, Image as HFImage
@@ -165,13 +166,19 @@ class CompletionDataset:
 
 
 if __name__ == "__main__":
-    PERCENTILE = 87
-    VIDEO_LENGTH = 60
+    parser = argparse.ArgumentParser(description="Generate completion dataset from session logs")
+    parser.add_argument("--percentile", type=int, default=85, 
+                       help="Percentile value for aggregated logs (default: 85)")
+    parser.add_argument("--video-length", type=int, default=60,
+                       help="Video length in seconds (default: 60)")
+    
+    args = parser.parse_args()
+    
     path = Path(__file__).parent.parent / "logs"
     sessions = []
     for session in path.iterdir():
-        if session.is_dir() and session.name.startswith("session_") and (session / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}").exists():
+        if session.is_dir() and session.name.startswith("session_") and (session / f"chunks_{args.percentile}_{args.video_length}").exists():
             sessions.append(session.name)
-    dataset = CompletionDataset(session_names=sessions, percentile=PERCENTILE, video_length=VIDEO_LENGTH)
+    dataset = CompletionDataset(session_names=sessions, percentile=args.percentile, video_length=args.video_length)
     dataset.to_dataset()
     dataset.save(Path(__file__).parent.parent / "datasets" / "completion_dataset")
