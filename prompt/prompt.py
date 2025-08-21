@@ -150,14 +150,18 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
         output_path = output_dir / f"chunk_{i:03d}.mp4"
 
         cmd = [
-            'ffmpeg',
-            '-ss', str(start_time),
-            '-i', str(video_path),
-            '-t', str(chunk_duration_seconds),
-            '-c', 'copy',
-            '-avoid_negative_ts', 'make_zero',
-            str(output_path),
-            '-y'
+            "ffmpeg",
+            "-ss", str(start_time),              # start time (accurate since re-encoding)
+            "-i", str(video_path),               # input video
+            "-t", str(chunk_duration_seconds),   # duration of chunk
+            "-c:v", "libx264",                   # re-encode video
+            "-preset", "veryfast",               # speed/quality tradeoff
+            "-crf", "20",                        # quality (lower = better quality, bigger file)
+            "-pix_fmt", "yuv420p",               # ensure compatibility (Safari/iOS/etc.)
+            "-movflags", "+faststart",           # optimize MP4 for playback
+            "-an",                               # strip audio completely
+            "-y",                                # overwrite output if exists
+            str(output_path),                    # output path
         ]
 
         print(f"Creating chunk {i + 1}/{num_chunks}: {output_path}")
