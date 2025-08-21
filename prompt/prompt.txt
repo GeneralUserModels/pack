@@ -45,16 +45,16 @@ Here are the user input events:
 6. IMPORTANT: **Merge repeated identical actions**
 
    - If the same action is done repeatedly with no change or intermediate action, **merge them into one action** with a wider start–end interval. For example, instead of multiple "Ran the command \"ls\" in the terminal," generate it ONLY once.
-   - If the user repeatedly switches between applications without performing any intermediate action, merge them into a single combined action. 
-   - Combine multiple switches together into a single event and widen the start-end interval appropriately:
-      - "Switched from X to Y to X."
-      - “Switched from X to Y to Z to X.”
+   - If the user repeatedly clicks / switches between applications without performing any intermediate action, merge them into a single combined action. 
+   - If events repeat, you MUST combine multiple events (e.g. clicks or switches) together into a single event and widen the start-end interval appropriately:
+      - "[Switched / clicked] [from / on] X to Y to X."
+      - “[Switched / clicked] [from / on] X to Y to Z to X.”
 
 ---
 
 ## Examples
 
-Generated captions should be in past tense, and at the level of detail as the examples below:
+Generated captions must be in past tense, and at the level of detail as the examples below:
 
 - Switched repeatedly from the terminal window to the desktop.
 - Switched from the terminal window to the desktop to Google Chrome.
