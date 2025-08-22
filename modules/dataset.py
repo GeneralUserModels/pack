@@ -5,10 +5,10 @@ import argparse
 from pathlib import Path
 from typing import List, Dict, Any
 from datasets import Dataset, DatasetDict, Features, Value, Image as HFImage
-
+import pdb
 
 class CompletionDataset:
-    def __init__(self, session_names: List[str], percentile: int = 87, video_length: int = 60):
+    def __init__(self, session_names: List[str], percentile: int = 85, video_length: int = 60):
         self.sessions = session_names
         self.percentile = percentile
         self.video_length = video_length
@@ -17,7 +17,7 @@ class CompletionDataset:
 
     def to_dataset(self, split_sizes=None) -> DatasetDict:
         if split_sizes is None:
-            split_sizes = {"train": 0.8, "validation": 0.1, "test": 0.1}
+            split_sizes = {"train": 0.8, "test": 0.2}
 
         sessions_data = []
         for session in self.sessions:
@@ -27,7 +27,7 @@ class CompletionDataset:
         split_counts = self._session_counts_from_split_sizes(split_sizes)
         start = 0
 
-        for split in ("train", "validation", "test"):
+        for split in ("train", "test"):
             count = split_counts.get(split, 0)
             split_data = sessions_data[start:start + count]
             flattened = [entry for session_list in split_data for entry in session_list]
@@ -59,8 +59,22 @@ class CompletionDataset:
         with open(aggregated_path, 'r', encoding='utf-8') as f:
             aggregated_logs = json.load(f)
 
+        flattened_aggregated_logs = []
+        for log in aggregated_logs:
+            flattened = [
+                {
+                    "time": log.get("start_timestamp"),
+                    "img": log.get("start_screenshot_path"),
+                },
+                {
+                    "time": log.get("end_timestamp"),
+                    "img": log.get("end_screenshot_path"),
+                }
+            ]
+            flattened_aggregated_logs.extend(flattened)
+
         for chunk_path in sorted(chunks_path.glob("*_result.json")):
-            captions.extend(self._load_captions_from_chunk(chunk_path, aggregated_logs))
+            captions.extend(self._load_captions_from_chunk(chunk_path, flattened_aggregated_logs))
         return captions
 
     def _load_captions_from_chunk(self, file_path: Path, aggregated_logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -68,8 +82,6 @@ class CompletionDataset:
             chunk_json = json.load(file)
 
         results = chunk_json.get("result", [])
-        chunk_start_time_str = chunk_json.get("start_time", "00:00")
-        chunk_start_seconds = self._parse_time_to_seconds(chunk_start_time_str)
 
         enriched = []
         for entry in results:
@@ -81,34 +93,23 @@ class CompletionDataset:
                 # skip malformed entries
                 continue
 
-            start_offset = chunk_start_seconds + self._parse_time_to_seconds(start_rel)
-            end_offset = chunk_start_seconds + self._parse_time_to_seconds(end_rel)
+            start_offset = self._parse_time_to_seconds(start_rel)
+            end_offset = self._parse_time_to_seconds(end_rel)
 
-            # clamp indices to aggregated_logs bounds
-            start_idx = max(0, int(start_offset))
-            end_idx = min(len(aggregated_logs) - 1, int(end_offset))
+            # just in case the end_offset is out of bounds
+            end_offset = min(end_offset, len(aggregated_logs) - 1)
 
-            aggregated_entry_logs = []
-            if start_idx <= end_idx and len(aggregated_logs) > 0:
-                aggregated_entry_logs = aggregated_logs[start_idx:end_idx + 1]
-
-            if aggregated_entry_logs:
+            try:
                 enriched_entry = {
                     "text": caption_text,
-                    "start_time": aggregated_entry_logs[0].get("start_timestamp"),
-                    "end_time": aggregated_entry_logs[-1].get("end_timestamp"),
-                    "start_img": aggregated_entry_logs[0].get("start_screenshot_path"),
-                    "end_img": aggregated_entry_logs[-1].get("end_screenshot_path"),
+                    "start_time": aggregated_logs[start_offset].get("time"),
+                    "end_time": aggregated_logs[end_offset].get("time"),
+                    "start_img": aggregated_logs[start_offset].get("img"),
+                    "end_img": aggregated_logs[end_offset].get("img"),
                 }
-            else:
-                # fallback if we couldn't slice aggregated logs
-                enriched_entry = {
-                    "text": caption_text,
-                    "start_time": None,
-                    "end_time": None,
-                    "start_img": None,
-                    "end_img": None,
-                }
+
+            except Exception as e:
+                print(f"Error: {e}")
 
             enriched.append(enriched_entry)
 
