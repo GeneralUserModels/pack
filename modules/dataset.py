@@ -17,29 +17,40 @@ class CompletionDataset:
 
     def to_dataset(self, split_sizes=None) -> DatasetDict:
         if split_sizes is None:
-            split_sizes = {"train": 0.8, "test": 0.2}
+            split_sizes = {"train": 0.8, "validation": 0.1, "test": 0.1}
 
-        sessions_data = []
+        # Load and combine all sessions data
+        all_data = []
         for session in self.sessions:
-            sessions_data.append(self.load_captions_from_session(session))
+            session_data = self.load_captions_from_session(session)
+            all_data.extend(session_data)
 
-        random.shuffle(sessions_data)
-        split_counts = self._session_counts_from_split_sizes(split_sizes)
-        start = 0
+        # Sort by start_time for temporal splitting
+        all_data.sort(key=lambda x: x.get("start_time", ""))
+        
+        # Calculate split indices based on temporal order
+        total_samples = len(all_data)
+        train_end = int(total_samples * split_sizes["train"])
+        val_end = train_end + int(total_samples * split_sizes["validation"])
+        
+        splits_data = {
+            "train": all_data[:train_end],
+            "validation": all_data[train_end:val_end], 
+            "test": all_data[val_end:]
+        }
 
-        for split in ("train", "test"):
-            count = split_counts.get(split, 0)
-            split_data = sessions_data[start:start + count]
-            flattened = [entry for session_list in split_data for entry in session_list]
-
+        # Create datasets for each split
+        for split_name, split_data in splits_data.items():
+            if not split_data:
+                continue
+                
             features = Features({
-                **{k: Value("string") for k in flattened[0] if k not in ("start_img", "end_img")},
+                **{k: Value("string") for k in split_data[0] if k not in ("start_img", "end_img")},
                 "start_img": HFImage(),
                 "end_img": HFImage()
             })
 
-            self.data[split] = Dataset.from_list(flattened, features=features)
-            start += count
+            self.data[split_name] = Dataset.from_list(split_data, features=features)
 
         return self.data
 
@@ -131,33 +142,6 @@ class CompletionDataset:
         else:
             return 0
 
-    def _session_counts_from_split_sizes(self, split_sizes: dict) -> dict:
-        total = len(self.sessions)
-        if total < len(split_sizes):
-            raise ValueError(f"Not enough sessions ({total}) to cover all splits ({len(split_sizes)}).")
-
-        raw_counts = {k: total * v for k, v in split_sizes.items()}
-        floored = {k: int(math.floor(c)) for k, c in raw_counts.items()}
-
-        for k in floored:
-            if floored[k] == 0:
-                floored[k] = 1
-
-        while sum(floored.values()) > total:
-            max_k = max(floored, key=floored.get)
-            floored[max_k] -= 1
-
-        remainder = total - sum(floored.values())
-        residuals = sorted(
-            ((k, raw_counts[k] - floored[k]) for k in split_sizes),
-            key=lambda x: x[1],
-            reverse=True
-        )
-        for i in range(remainder):
-            floored[residuals[i % len(residuals)][0]] += 1
-
-        return floored
-
     def save(self, path: Path):
         if not path.exists():
             path.mkdir(parents=True)
@@ -180,6 +164,13 @@ if __name__ == "__main__":
     for session in path.iterdir():
         if session.is_dir() and session.name.startswith("session_") and (session / f"chunks_{args.percentile}_{args.video_length}").exists():
             sessions.append(session.name)
+    
+    print(f"Found {len(sessions)} sessions: {sessions}")
+    print("Using temporal splitting (combining all sessions and sorting by timestamp)")
+    
     dataset = CompletionDataset(session_names=sessions, percentile=args.percentile, video_length=args.video_length)
     dataset.to_dataset()
-    dataset.save(Path(__file__).parent.parent / "datasets" / "completion_dataset")
+    
+    output_dir = Path(__file__).parent.parent / "datasets" / "completion_dataset"
+    dataset.save(output_dir)
+    print(f"Dataset saved to: {output_dir}")
