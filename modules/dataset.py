@@ -60,14 +60,12 @@ class CompletionDataset:
         """
         if time_str is None:
             return 0.0
-        # if already numeric
         if isinstance(time_str, (int, float)):
             return float(time_str)
         parts = time_str.split(":")
         try:
             parts = [float(p) for p in parts]
         except ValueError:
-            # malformed, return 0
             return 0.0
         if len(parts) == 3:
             hours, minutes, seconds = parts
@@ -118,7 +116,6 @@ class CompletionDataset:
 
             if start_idx <= end_idx:
                 aggregated_entry_logs = aggregated_logs[start_idx:end_idx + 1]
-                print(start_idx, end_idx, len(aggregated_logs))
                 enriched_entry = {
                     "text": caption_text,
                     "start_time": aggregated_entry_logs[0].get("start_timestamp"),
@@ -149,7 +146,7 @@ class CompletionDataset:
 
 
 if __name__ == "__main__":
-    PERCENTILE = 87
+    PERCENTILE = 85
     VIDEO_LENGTH = 60
     path = Path(__file__).parent.parent / "logs"
     sessions = []
@@ -158,4 +155,4 @@ if __name__ == "__main__":
             sessions.append(session.name)
     dataset = CompletionDataset(session_names=sessions, percentile=PERCENTILE, video_length=VIDEO_LENGTH)
     dataset.to_dataset()
-    dataset.save(Path(__file__).parent.parent / "datasets" / "completion_dataset")
+    dataset.save(Path(__file__).parent.parent / "datasets" / "image_dataset_85")
