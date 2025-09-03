@@ -32,12 +32,12 @@ def get_available_sessions(logs_dir="logs"):
     if not logs_path.exists():
         print(f"Logs directory not found: {logs_path}")
         return []
-    
+
     sessions = []
     for item in logs_path.iterdir():
         if item.is_dir() and item.name.startswith("session_"):
             sessions.append(item.name)
-    
+
     return sorted(sessions)
 
 
@@ -46,11 +46,11 @@ def display_session_options(sessions):
     if not sessions:
         print("No sessions found in logs directory.")
         return None
-    
+
     print("\nAvailable sessions:")
     for i, session in enumerate(sessions, 1):
         print(f"{i}. {session}")
-    
+
     while True:
         try:
             choice = input(f"\nSelect a session (1-{len(sessions)}): ")
@@ -69,7 +69,7 @@ def get_available_percentiles(session_folder):
     if not session_path.exists():
         print(f"Session directory not found: {session_path}")
         return []
-    
+
     percentiles = []
     for item in session_path.iterdir():
         if item.is_file() and item.name.startswith("event_logs_video_") and item.name.endswith(".mp4"):
@@ -79,7 +79,7 @@ def get_available_percentiles(session_folder):
                 percentiles.append(percentile)
             except ValueError:
                 continue
-    
+
     return sorted(percentiles)
 
 
@@ -88,11 +88,11 @@ def display_percentile_options(percentiles):
     if not percentiles:
         print("No video files found in session directory.")
         return None
-    
+
     print("\nAvailable percentiles:")
     for i, percentile in enumerate(percentiles, 1):
         print(f"{i}. {percentile}%")
-    
+
     while True:
         try:
             choice = input(f"\nSelect a percentile (1-{len(percentiles)}): ")
@@ -168,7 +168,7 @@ def split_video(video_path, output_dir, chunk_duration_seconds):
             continue
 
         chunk_paths.append(output_path)
-    
+
     return chunk_paths
 
 
@@ -410,7 +410,7 @@ if __name__ == "__main__":
     if not selected_session:
         print("No session selected. Exiting.")
         exit()
-    
+
     SESSION_FOLDER = Path(__file__).parent.parent / "logs" / selected_session
     video_files = get_available_percentiles(SESSION_FOLDER)
     selected_percentile = display_percentile_options(video_files)
@@ -418,7 +418,7 @@ if __name__ == "__main__":
     if not selected_percentile:
         print("No percentile selected. Exiting.")
         exit()
-    
+
     VIDEO_PATH = SESSION_FOLDER / f"event_logs_video_{selected_percentile}.mp4"
     AGG_JSON = SESSION_FOLDER / f'aggregated_logs_{selected_percentile}.json'
 
