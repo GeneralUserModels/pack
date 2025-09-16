@@ -18,6 +18,8 @@ dependencies = [
     "dotenv>=0.9.9",
     "google-generativeai>=0.8.5",
     "datasets>=3.0.0,<4.0.0",
+    "pillow>=11.3.0",
+    "imageio>=2.37.0",
 ]
 
 [tool.uv]
