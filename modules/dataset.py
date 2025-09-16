@@ -1,13 +1,15 @@
 import json
 import random
 import math
+import argparse
 from pathlib import Path
 from typing import List, Dict, Any
 from datasets import Dataset, DatasetDict, Features, Value, Image as HFImage
+import pdb
 
 
 class CompletionDataset:
-    def __init__(self, session_names: List[str], percentile: int = 87, video_length: int = 60, log_interval_seconds: float = 4.0):
+    def __init__(self, session_names: List[str], percentile: int = 85, video_length: int = 60):
         self.sessions = session_names
         self.percentile = percentile
         self.video_length = video_length
@@ -17,17 +19,38 @@ class CompletionDataset:
 
     def to_dataset(self) -> DatasetDict:
 
-        sessions_data = []
+        # Load and combine all sessions data
+        all_data = []
         for session in self.sessions:
-            sessions_data.append(self.load_captions_from_session(session))
+            session_data = self.load_captions_from_session(session)
+            all_data.extend(session_data)
 
-        flattened = [entry for session_list in sessions_data for entry in session_list]
+        # Sort by start_time for temporal splitting
+        all_data.sort(key=lambda x: x.get("start_time", ""))
 
-        features = Features({
-            **{k: Value("string") for k in flattened[0] if k not in ("start_img", "end_img")},
-            "start_img": HFImage(),
-            "end_img": HFImage()
-        })
+        # Calculate split indices based on temporal order
+        total_samples = len(all_data)
+        train_end = int(total_samples * split_sizes["train"])
+        val_end = train_end + int(total_samples * split_sizes["validation"])
+
+        splits_data = {
+            "train": all_data[:train_end],
+            "validation": all_data[train_end:val_end],
+            "test": all_data[val_end:]
+        }
+
+        # Create datasets for each split
+        for split_name, split_data in splits_data.items():
+            if not split_data:
+                continue
+
+            features = Features({
+                **{k: Value("string") for k in split_data[0] if k not in ("start_img", "end_img")},
+                "start_img": HFImage(),
+                "end_img": HFImage()
+            })
+
+            self.data[split_name] = Dataset.from_list(split_data, features=features)
 
         self.data = Dataset.from_list(flattened, features=features)
         return self.data
@@ -48,8 +71,22 @@ class CompletionDataset:
         with open(aggregated_path, 'r', encoding='utf-8') as f:
             aggregated_logs = json.load(f)
 
+        flattened_aggregated_logs = []
+        for log in aggregated_logs:
+            flattened = [
+                {
+                    "time": log.get("start_timestamp"),
+                    "img": log.get("start_screenshot_path"),
+                },
+                {
+                    "time": log.get("end_timestamp"),
+                    "img": log.get("end_screenshot_path"),
+                }
+            ]
+            flattened_aggregated_logs.extend(flattened)
+
         for chunk_path in sorted(chunks_path.glob("*_result.json")):
-            captions.extend(self._load_captions_from_chunk(chunk_path, aggregated_logs))
+            captions.extend(self._load_captions_from_chunk(chunk_path, flattened_aggregated_logs))
         return captions
 
     @staticmethod
@@ -83,8 +120,6 @@ class CompletionDataset:
             chunk_json = json.load(file)
 
         results = chunk_json.get("result", [])
-        chunk_start_time_str = chunk_json.get("start_time", "00:00")
-        chunk_start_seconds = self._parse_time_to_seconds(chunk_start_time_str)
 
         enriched = []
         for entry in results:
@@ -94,48 +129,43 @@ class CompletionDataset:
             if caption_text is None or start_rel is None or end_rel is None:
                 continue
 
-            start_offset = chunk_start_seconds + self._parse_time_to_seconds(start_rel)
-            end_offset = chunk_start_seconds + self._parse_time_to_seconds(end_rel)
+            start_offset = self._parse_time_to_seconds(start_rel)
+            end_offset = self._parse_time_to_seconds(end_rel)
 
-            if not aggregated_logs:
-                print(f"Warning: no aggregated logs available for {file_path}. Skipping timestamps.")
+            # just in case the end_offset is out of bounds
+            end_offset = min(end_offset, len(aggregated_logs) - 1)
+
+            try:
                 enriched_entry = {
                     "text": caption_text,
-                    "start_time": None,
-                    "end_time": None,
-                    "start_img": None,
-                    "end_img": None,
+                    "start_time": aggregated_logs[start_offset].get("time"),
+                    "end_time": aggregated_logs[end_offset].get("time"),
+                    "start_img": aggregated_logs[start_offset].get("img"),
+                    "end_img": aggregated_logs[end_offset].get("img"),
                 }
-                enriched.append(enriched_entry)
-                continue
 
-            interval = self.log_interval_seconds
-
-            start_idx = max(0, int(math.floor(start_offset / interval)))
-            end_idx = min(len(aggregated_logs) - 1, int(math.ceil(end_offset / interval)))
-
-            if start_idx <= end_idx:
-                aggregated_entry_logs = aggregated_logs[start_idx:end_idx + 1]
-                enriched_entry = {
-                    "text": caption_text,
-                    "start_time": aggregated_entry_logs[0].get("start_timestamp"),
-                    "end_time": aggregated_entry_logs[-1].get("end_timestamp"),
-                    "start_img": aggregated_entry_logs[0].get("start_screenshot_path"),
-                    "end_img": aggregated_entry_logs[-1].get("end_screenshot_path"),
-                }
-            else:
-                print(f"Warning: start_idx {start_idx} > end_idx {end_idx} for {file_path.parent.parent.name}.")
-                enriched_entry = {
-                    "text": caption_text,
-                    "start_time": None,
-                    "end_time": None,
-                    "start_img": None,
-                    "end_img": None,
-                }
+            except Exception as e:
+                print(f"Error: {e}")
 
             enriched.append(enriched_entry)
 
         return enriched
+
+    @staticmethod
+    def _parse_time_to_seconds(time_str: str) -> int:
+        parts = time_str.split(":")
+        try:
+            parts = [int(p) for p in parts]
+        except ValueError:
+            return 0
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return minutes * 60 + seconds
+        elif len(parts) == 3:
+            hours, minutes, seconds = parts
+            return hours * 3600 + minutes * 60 + seconds
+        else:
+            return 0
 
     def save(self, path: Path):
         if not path.exists():
@@ -146,13 +176,26 @@ class CompletionDataset:
 
 
 if __name__ == "__main__":
-    PERCENTILE = 85
-    VIDEO_LENGTH = 60
+    parser = argparse.ArgumentParser(description="Generate completion dataset from session logs")
+    parser.add_argument("--percentile", type=int, default=85,
+                        help="Percentile value for aggregated logs (default: 85)")
+    parser.add_argument("--video-length", type=int, default=60,
+                        help="Video length in seconds (default: 60)")
+
+    args = parser.parse_args()
+
     path = Path(__file__).parent.parent / "logs"
     sessions = []
     for session in path.iterdir():
-        if session.is_dir() and session.name.startswith("session_") and (session / f"chunks_{PERCENTILE}_{VIDEO_LENGTH}").exists():
+        if session.is_dir() and session.name.startswith("session_") and (session / f"chunks_{args.percentile}_{args.video_length}").exists():
             sessions.append(session.name)
-    dataset = CompletionDataset(session_names=sessions, percentile=PERCENTILE, video_length=VIDEO_LENGTH)
+
+    print(f"Found {len(sessions)} sessions: {sessions}")
+    print("Using temporal splitting (combining all sessions and sorting by timestamp)")
+
+    dataset = CompletionDataset(session_names=sessions, percentile=args.percentile, video_length=args.video_length)
     dataset.to_dataset()
-    dataset.save(Path(__file__).parent.parent / "datasets" / "image_dataset_85")
+
+    output_dir = Path(__file__).parent.parent / "datasets" / "completion_dataset"
+    dataset.save(output_dir)
+    print(f"Dataset saved to: {output_dir}")

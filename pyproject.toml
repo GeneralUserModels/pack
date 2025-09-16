@@ -17,6 +17,7 @@ dependencies = [
     "nbformat (>=5.10.4,<6.0.0)",
     "dotenv>=0.9.9",
     "google-generativeai>=0.8.5",
+    "datasets>=3.0.0,<4.0.0",
 ]
 
 [tool.uv]

@@ -31,3 +31,8 @@ uv run -m pipeline
 # adjust SESSION variable of the prompt/prompt.py to match your session directory 
 uv run -m prompt.prompt
 ```
+
+### create dataset for huggingface
+```shell
+uv run -m modules.dataset
+```

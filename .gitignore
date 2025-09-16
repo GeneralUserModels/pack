@@ -10,6 +10,8 @@ prompting_benchmark/data/*
 !prompting_benchmark/data/chunks_85_60_1/
 !prompting_benchmark/data/screenshots/
 
+datasets
+
 # C extensions
 *.so
 
