@@ -10,6 +10,7 @@ stop_event = threading.Event()
 
 SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v2_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 SCREENSHOT_DIR = SESSION_DIR / "screenshots"
+BUFFER_SCREENSHOTS_DIR = SESSION_DIR / "buffer_screenshots"  # New directory for buffer saves
 LOG_FILE = SESSION_DIR / "events.jsonl"
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -21,19 +22,31 @@ DEBOUNCING_THRESHOLDS = {
     "keyboard_release": 3.0,
 }
 
-BUFFER_FPS = 60
+BUFFER_FPS = 6
 BUFFER_SECONDS = 3.0
 LOOKBACK_MS = 100
 FORWARD_DELAY_MS = 100
+
+SAVE_ALL_BUFFER = True
 
 
 def main():
     print(f"Session started: {SESSION_DIR}")
     print(f"Screenshots: {SCREENSHOT_DIR}")
+
+    if SAVE_ALL_BUFFER:
+        BUFFER_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"Buffer screenshots will be saved to: {BUFFER_SCREENSHOTS_DIR}")
+
     print(f"Using buffered screenshots at {BUFFER_FPS} FPS, keeping {BUFFER_SECONDS}s in memory")
 
     event_queue = EventQueue(maxsize=1024, debouncing_thresholds=DEBOUNCING_THRESHOLDS)
-    screenshot_manager = ScreenshotManager(fps=BUFFER_FPS, buffer_seconds=BUFFER_SECONDS)
+    screenshot_manager = ScreenshotManager(
+        fps=BUFFER_FPS,
+        buffer_seconds=BUFFER_SECONDS,
+        save_all_buffer=SAVE_ALL_BUFFER,
+        buffer_save_dir=BUFFER_SCREENSHOTS_DIR if SAVE_ALL_BUFFER else None
+    )
 
     screenshot_manager.start()
     print("Buffered screenshot capture started")
