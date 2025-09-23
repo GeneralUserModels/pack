@@ -2,7 +2,7 @@ import datetime
 import threading
 from pathlib import Path
 from pynput import keyboard, mouse
-from record import EventQueue, io_worker, poll_worker, InputEventHandler, ScreenshotManager
+from record import EventQueue, io_worker, InputEventHandler, ScreenshotManager
 
 stop_event = threading.Event()
 SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v2_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
@@ -14,19 +14,11 @@ SSIM_LOG_FILE = SESSION_DIR / "img_similarities.jsonl"
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
-DEBOUNCING_THRESHOLDS = {
-    "mouse_move": 2.0,
-    "mouse_scroll": 3.0,
-    "keyboard_press": 3.0,
-    "keyboard_release": 3.0,
-}
-
-BUFFER_FPS = 6
-BUFFER_SECONDS = 3.0
-LOOKBACK_MS = 100
-FORWARD_DELAY_MS = 100
+BUFFER_FPS = 30
+BUFFER_SECONDS = 6.0
 SAVE_ALL_BUFFER = True
 LOG_SSIM = True
+THUMB_W = 320
 
 
 def main():
@@ -43,33 +35,25 @@ def main():
 
     print(f"Using buffered screenshots at {BUFFER_FPS} FPS, keeping {BUFFER_SECONDS}s in memory")
 
-    event_queue = EventQueue(maxsize=1024, debouncing_thresholds=DEBOUNCING_THRESHOLDS)
+    event_queue = EventQueue(maxsize=1024)
 
-    # Create enhanced screenshot manager with SSIM logging
+    # Create the ScreenshotManager with the capture-process enabled for reliable 60 FPS
     screenshot_manager = ScreenshotManager(
         fps=BUFFER_FPS,
         buffer_seconds=BUFFER_SECONDS,
         save_all_buffer=SAVE_ALL_BUFFER,
         buffer_save_dir=BUFFER_SCREENSHOTS_DIR if SAVE_ALL_BUFFER else None,
         log_ssim=LOG_SSIM,
-        ssim_log_file=SSIM_LOG_FILE if LOG_SSIM else None
+        ssim_log_file=SSIM_LOG_FILE if LOG_SSIM else None,
+        thumb_w=THUMB_W
     )
 
     screenshot_manager.start()
     print("Buffered screenshot capture with SSIM logging started")
 
-    # Start worker threads
     threading.Thread(target=io_worker, args=(event_queue, SCREENSHOT_DIR, LOG_FILE), daemon=True).start()
-    threading.Thread(target=poll_worker, args=(screenshot_manager, event_queue, 60.0), daemon=True).start()
 
-    # Create input event handler
-    h = InputEventHandler(
-        event_queue,
-        screenshot_manager,
-        move_interval=1.0,
-        lookback_ms=LOOKBACK_MS,
-        forward_delay_ms=FORWARD_DELAY_MS
-    )
+    h = InputEventHandler(event_queue, screenshot_manager)
 
     print("Starting input listeners...")
     try:
@@ -92,6 +76,7 @@ def main():
         print("Cleaning up...")
         screenshot_manager.stop()
         try:
+            # if the io_worker uses event_queue.queue.join()
             event_queue.queue.join()
         except Exception as e:
             print(f"Error while waiting for queue to empty: {e}")
@@ -100,4 +85,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # On Windows, multiprocessing uses spawn and will re-import this module, so we must keep
+    # top-level side-effects minimal and only run main here.
     main()
