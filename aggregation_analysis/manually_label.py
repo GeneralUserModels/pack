@@ -2,11 +2,9 @@ import json
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-import argparse
 from pathlib import Path
 import threading
 import time
-from collections import deque
 import re
 
 
@@ -420,7 +418,7 @@ class ImageLabelingTool:
 
 
 def main():
-    session_path = Path(__file__).parent / "session"
+    session_path = Path(__file__).parent / "session_3"
     if not session_path.exists():
         print(f"Session directory not found: {session_path}")
         return

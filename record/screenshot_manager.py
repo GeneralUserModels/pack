@@ -1,9 +1,6 @@
-import datetime
 import threading
 from pathlib import Path
 import asyncio
-
-# system libs
 import time
 import io
 import json
@@ -15,18 +12,8 @@ import multiprocessing
 import numpy as np
 from multiprocessing import shared_memory, Value, Lock
 
-SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v2_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-SCREENSHOT_DIR = SESSION_DIR / "screenshots"
-BUFFER_SCREENSHOTS_DIR = SESSION_DIR / "buffer_screenshots"
-LOG_FILE = SESSION_DIR / "events.jsonl"
-SSIM_LOG_FILE = SESSION_DIR / "img_similarities.jsonl"
-
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
-SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-
 BUFFER_FPS = 60                  # target capture FPS
 BUFFER_SECONDS = 6.0             # how many seconds of thumbnails to keep
-SAVE_ALL_BUFFER = True           # whether to attempt to save full-res frames (may drop)
 LOG_SSIM = True                  # whether to compute & log SSIM
 THUMB_W = 320                    # thumbnail width (keeps aspect ratio)
 JPEG_QUALITY_SAVE = 70           # quality when saving full-res (tune for speed)
@@ -37,12 +24,13 @@ SAVE_QUEUE_MAXSIZE = 512         # max queue size for save worker (bounded to av
 # ------------------------
 
 
-def _ssim_worker_process(ssim_queue, log_file):
+def _ssim_worker_process(ssim_queue, log_file, out_queue=None):
     """Dedicated SSIM computation and logging process."""
     from pathlib import Path
     import queue as _q
     from skimage.metrics import structural_similarity as ssim
     import numpy as np
+    import time as _time
 
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,26 +44,24 @@ def _ssim_worker_process(ssim_queue, log_file):
                 if item is None:
                     break
 
-                # Item format: (timestamp, thumb_bytes, thumb_w, thumb_h, monitor_id, slot_index)
                 timestamp, thumb_bytes, thumb_w, thumb_h, monitor_id, slot_index = item
 
-                # Convert bytes to numpy array
                 try:
                     arr = np.frombuffer(thumb_bytes, dtype=np.uint8).reshape((thumb_h, thumb_w))
                 except Exception as e:
                     print(f"[ssim_worker] error reshaping thumb: {e}")
                     continue
 
-                # compute SSIM against prev_thumb if available
                 ssim_value = None
                 if prev_thumb is not None:
                     try:
                         data_range = float(arr.max() - arr.min()) if arr.max() != arr.min() else 1.0
-                        ssim_value = ssim(prev_thumb, arr, data_range=data_range)
+                        ssim_value = float(ssim(prev_thumb, arr, data_range=data_range))
 
                         ssim_entry = {
-                            "timestamp": time.strftime("%Y-%m-%d_%H-%M-%S-%f", time.localtime(timestamp)),
-                            "unix_timestamp": timestamp,
+                            "timestamp": _time.time() if isinstance(timestamp, float) else timestamp,
+                            "formatted_timestamp": _time.strftime("%Y-%m-%d_%H-%M-%S-%f", _time.localtime(timestamp)),
+                            "unix_timestamp": float(timestamp),
                             "monitor_id": monitor_id,
                             "slot_index": slot_index,
                             "ssim_similarity": float(ssim_value),
@@ -85,10 +71,16 @@ def _ssim_worker_process(ssim_queue, log_file):
                         json.dump(ssim_entry, f)
                         f.write("\n")
                         f.flush()
+
+                        # forward to main process if requested
+                        if out_queue is not None:
+                            try:
+                                out_queue.put_nowait(ssim_entry)
+                            except Exception:
+                                pass
                     except Exception as e:
                         print(f"[ssim_worker] SSIM computation error: {e}")
 
-                # Update previous thumbnail
                 prev_thumb = arr.copy()
 
             except _q.Empty:
@@ -96,15 +88,18 @@ def _ssim_worker_process(ssim_queue, log_file):
             except Exception as e:
                 print(f"[ssim_worker] error: {e}")
                 continue
-
-
 # ------------------------
 # Async save worker
 # ------------------------
 
+
+# inside screenshot_manager.py - updated async save worker
 async def _async_save_worker(name: str, queue: asyncio.Queue, out_dir: Path):
-    """Async worker that saves images to disk using aiofiles."""
     import aiofiles
+    import os
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     while True:
         try:
@@ -119,9 +114,15 @@ async def _async_save_worker(name: str, queue: asyncio.Queue, out_dir: Path):
         try:
             timestamp, image_bytes, format_type, filename = item
             filepath = out_dir / filename
+            tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
 
-            async with aiofiles.open(filepath, "wb") as f:
+            # Write to tmp file first (atomic rename later)
+            async with aiofiles.open(tmp_path, "wb") as f:
                 await f.write(image_bytes)
+                # ensure file is flushed/closed by exiting context
+
+            # Atomically move tmp -> final
+            os.replace(str(tmp_path), str(filepath))
 
         except Exception as e:
             print(f"[{name}] Error saving: {e}")
@@ -197,16 +198,59 @@ class ThumbSharedBuffer:
 # Async capture process using the efficient approach from the second script
 # ------------------------
 
-async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_name, thumb_w, thumb_h, slots, fps, stop_event, save_all_buffer=True, with_cursor=True):
+async def _async_capture_process(
+    meta_queue,
+    save_queue_async,
+    ssim_queue,
+    shm_name,
+    thumb_w,
+    thumb_h,
+    slots,
+    fps,
+    stop_event,
+    save_all_buffer=True,
+    with_cursor=True,
+    export_request_queue=None,
+    export_done_queue=None
+):
     """
-    Async capture process that efficiently captures screenshots and processes them.
-    Uses the approach from the working async script.
+    Async capture process (updated):
+      - supports on-demand export requests via export_request_queue (items: (req_id, target_ts, out_path))
+      - signals completions on export_done_queue with tuples (req_id, target_ts, out_path, success_bool)
+      - encodes full-res JPEG only when save_all_buffer=True or when there are pending exports
+      - writes exports atomically (tmp -> final) using aiofiles + os.replace
     """
     import concurrent.futures
+    import queue as _q
+    import aiofiles
+    import os
+    import time
 
     # reopen shared memory
     shm = shared_memory.SharedMemory(name=shm_name)
     slot_size = thumb_w * thumb_h
+
+    # pending export requests (serviced when a matching full-res is available)
+    pending_exports: List[Dict[str, Any]] = []  # elements: {"req_id":..., "target_ts":..., "out_path":...}
+    export_tolerance = 0.5  # seconds tolerance when matching export request to a captured frame
+
+    def drain_export_requests():
+        """Move items from export_request_queue into pending_exports (non-blocking)."""
+        if export_request_queue is None:
+            return
+        try:
+            while True:
+                req = export_request_queue.get_nowait()
+                if req is None:
+                    break
+                try:
+                    req_id, target_ts, out_path = req
+                    pending_exports.append({"req_id": req_id, "target_ts": float(target_ts), "out_path": str(out_path)})
+                except Exception:
+                    continue
+        except Exception:
+            # likely queue empty
+            pass
 
     def get_cursor_position_proc():
         try:
@@ -246,13 +290,44 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
         end = start + slot_size
         shm.buf[start:end] = thumb_bytes
 
-    # Create thread pool for CPU-intensive operations (thumbnail processing, JPEG encoding)
+    # Create thread pool for CPU-intensive operations (thumbnail processing, optional JPEG encoding)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     interval = 1.0 / max(fps, 0.1)
     loop = asyncio.get_running_loop()
 
-    def process_screenshot(shot_data, timestamp, monitor_id):
+    def _put_into_save_queue(item):
+        """
+        Put item into save_queue_async whether it's an asyncio.Queue or a multiprocessing.Queue.
+        item: (timestamp, image_bytes, format_type, filename)
+        """
+        if save_queue_async is None:
+            return
+        # If it's an asyncio.Queue, it will have a coroutine .put
+        try:
+            # try awaiting in executor if not coroutine-available here (we are not async in this helper)
+            # We'll return an awaitable by using loop.run_in_executor to call blocking put
+            if hasattr(save_queue_async, "put") and asyncio.iscoroutinefunction(save_queue_async.put):
+                # This branch is unlikely because we are in a thread context; the caller will await.
+                # But keep it for completeness.
+                return loop.create_task(save_queue_async.put(item))
+        except Exception:
+            pass
+
+        # If it has put_nowait (likely multiprocessing.Queue or similar) use that in executor to avoid blocking event loop
+        try:
+            if hasattr(save_queue_async, "put_nowait"):
+                save_queue_async.put_nowait(item)
+                return None
+        except Exception:
+            # fallback to blocking put in executor
+            try:
+                loop.run_in_executor(None, save_queue_async.put, item)
+                return None
+            except Exception:
+                return None
+
+    def process_screenshot(shot_data, timestamp, monitor_id, encode_full: bool):
         """Process screenshot in thread pool - create thumbnail and optionally encode JPEG"""
         shot, monitor = shot_data
 
@@ -260,7 +335,7 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
             # Create PIL image from screenshot
             pil = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
-            # Create thumbnail
+            # Create thumbnail (grayscale)
             w_orig, h_orig = pil.size
             thumb_h_local = max(1, int((thumb_w * h_orig) / w_orig))
             thumb = pil.convert("L").resize((thumb_w, thumb_h_local), resample=Image.BILINEAR)
@@ -278,12 +353,17 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
             else:
                 write_bytes = thumb_bytes
 
-            # Encode full-res JPEG if saving
+            # Encode full-res JPEG only if requested
             full_jpeg_bytes = None
-            if save_all_buffer:
-                jpeg_buf = io.BytesIO()
-                pil.save(jpeg_buf, format="JPEG", quality=JPEG_QUALITY_SAVE)
-                full_jpeg_bytes = jpeg_buf.getvalue()
+            if encode_full:
+                try:
+                    jpeg_buf = io.BytesIO()
+                    # Use reasonable quality (configurable elsewhere)
+                    pil.save(jpeg_buf, format="JPEG", quality=JPEG_QUALITY_SAVE)
+                    full_jpeg_bytes = jpeg_buf.getvalue()
+                except Exception as e:
+                    print(f"[process_screenshot] jpeg encode error: {e}")
+                    full_jpeg_bytes = None
 
             return write_bytes, full_jpeg_bytes, monitor_id
 
@@ -299,7 +379,10 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
                 timestamp = time.time()
 
                 try:
-                    # Fast screenshot capture (this is the bottleneck we want to minimize)
+                    # Drain export requests before capture so we know whether to encode full-res for this frame
+                    drain_export_requests()
+                    encode_full_for_this_frame = save_all_buffer or (len(pending_exports) > 0)
+
                     monitor = get_active_monitor_bounds_proc()
                     shot = sct.grab(monitor)
 
@@ -309,7 +392,8 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
                         process_screenshot,
                         (shot, monitor),
                         timestamp,
-                        monitor.get("monitor_id", 1)
+                        monitor.get("monitor_id", 1),
+                        encode_full_for_this_frame
                     )
 
                     # Create task to handle the result without blocking
@@ -323,25 +407,85 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
                             slot_idx = int(round(ts * fps)) % slots
                             write_thumb_slot(slot_idx, thumb_bytes)
 
-                            # Send metadata to main process
+                            # Send metadata to main process (non-blocking)
                             try:
                                 meta_queue.put((ts, slot_idx, mon_id, len(thumb_bytes)), block=False)
-                            except:
+                            except Exception:
                                 pass  # Drop if queue full
 
-                            # Send thumbnail to SSIM process
+                            # Send thumbnail to SSIM process (non-blocking)
                             try:
-                                ssim_queue.put((ts, thumb_bytes, thumb_w, thumb_h, mon_id, slot_idx), block=False)
-                            except:
+                                if ssim_queue is not None:
+                                    ssim_queue.put((ts, thumb_bytes, thumb_w, thumb_h, mon_id, slot_idx), block=False)
+                            except Exception:
                                 pass  # Drop if queue full
 
-                            # Save full-res image if enabled
-                            if save_all_buffer and jpeg_bytes and save_queue_async:
-                                filename = f"buffer_active_{ts:.6f}.jpg"
+                            # Save full-res image if continuous saving is enabled
+                            if save_all_buffer and jpeg_bytes is not None and save_queue_async:
+                                # Put into save queue (supports asyncio.Queue or multiprocessing.Queue)
                                 try:
-                                    await save_queue_async.put((ts, jpeg_bytes, "jpeg", filename))
-                                except:
+                                    # If save_queue_async is asyncio.Queue, awaitable returned from _put_into_save_queue
+                                    task = _put_into_save_queue((ts, jpeg_bytes, "jpeg", f"buffer_active_{ts:.6f}.jpg"))
+                                    if task is not None:
+                                        # if _put_into_save_queue returned a coroutine/task, await it
+                                        await task
+                                except Exception:
                                     pass  # Drop if queue full
+
+                            # Service any pending export requests whose target_ts is near this ts
+                            if jpeg_bytes is not None and pending_exports:
+                                satisfied = []
+                                for req in list(pending_exports):
+                                    try:
+                                        if abs(req["target_ts"] - ts) <= export_tolerance:
+                                            out_path = Path(req["out_path"])
+                                            # ensure parent exists
+                                            out_path.parent.mkdir(parents=True, exist_ok=True)
+                                            tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+                                            try:
+                                                # write atomically with aiofiles
+                                                async with aiofiles.open(tmp_path, "wb") as af:
+                                                    await af.write(jpeg_bytes)
+                                                # atomic replace
+                                                os.replace(str(tmp_path), str(out_path))
+                                                success = True
+                                            except Exception as e:
+                                                # fallback attempt: blocking write via run_in_executor
+                                                try:
+                                                    def blocking_write(p, data):
+                                                        p = Path(p)
+                                                        tmp = p.with_suffix(p.suffix + ".tmp")
+                                                        with open(tmp, "wb") as f:
+                                                            f.write(data)
+                                                        os.replace(str(tmp), str(p))
+                                                    await loop.run_in_executor(None, blocking_write, str(out_path), jpeg_bytes)
+                                                    success = True
+                                                except Exception as e2:
+                                                    success = False
+                                                    # print error for debugging
+                                                    print(f"[async_capture export] failed to write export {out_path}: {e2}")
+
+                                            # inform requester via export_done_queue if available
+                                            if export_done_queue is not None:
+                                                try:
+                                                    export_done_queue.put_nowait((req["req_id"], req["target_ts"], str(out_path), success))
+                                                except Exception:
+                                                    # if put_nowait not available, try blocking put in executor
+                                                    try:
+                                                        loop.run_in_executor(None, export_done_queue.put, (req["req_id"], req["target_ts"], str(out_path), success))
+                                                    except Exception:
+                                                        pass
+
+                                            satisfied.append(req)
+                                    except Exception as e:
+                                        # ignore per-request errors
+                                        print(f"[async_capture export] per-request error: {e}")
+                                # remove satisfied requests
+                                for req in satisfied:
+                                    try:
+                                        pending_exports.remove(req)
+                                    except Exception:
+                                        pass
 
                         except Exception as e:
                             print(f"[handle_processed_shot] error: {e}")
@@ -365,21 +509,19 @@ async def _async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_n
             executor.shutdown(wait=False)
         except Exception:
             pass
-        # Signal termination
         try:
             meta_queue.put(None)
         except Exception:
             pass
 
 
-def _run_async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_name, thumb_w, thumb_h, slots, fps, stop_event, save_all_buffer, with_cursor):
-    """Wrapper to run the async capture process in a new event loop"""
+def _run_async_capture_process(meta_queue, save_queue_async, ssim_queue, shm_name, thumb_w, thumb_h, slots, fps, stop_event, save_all_buffer, with_cursor, export_request_queue=None, export_done_queue=None):
     async def main():
         await _async_capture_process(
             meta_queue, save_queue_async, ssim_queue, shm_name,
-            thumb_w, thumb_h, slots, fps, stop_event, save_all_buffer, with_cursor
+            thumb_w, thumb_h, slots, fps, stop_event, save_all_buffer, with_cursor,
+            export_request_queue, export_done_queue
         )
-
     # Create new event loop for this process
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -434,6 +576,10 @@ class ScreenshotManager:
 
         # reader thread
         self._reader_thread = None
+        self.ssim_buffer = deque(maxlen=self.slots)
+        self._ssim_out_queue = None
+        self._export_request_queue = None
+        self._export_done_queue = None
 
         # Setup workers
         if self.save_all_buffer:
@@ -502,12 +648,46 @@ class ScreenshotManager:
 
     def _setup_ssim_process(self):
         self._ssim_queue = multiprocessing.Queue(maxsize=1000)
+        self._ssim_out_queue = multiprocessing.Queue(maxsize=1000)
         self._ssim_process = multiprocessing.Process(
             target=_ssim_worker_process,
-            args=(self._ssim_queue, self.ssim_log_file),
+            args=(self._ssim_queue, self.ssim_log_file, self._ssim_out_queue),
             daemon=True
         )
         self._ssim_process.start()
+
+    def request_fullres_save(self, target_ts: float, out_path: str, timeout: float = 2.0):
+        """
+        Request the capture process to export the nearest full-res JPEG to out_path.
+        Returns True on success (export_done received), False on timeout/failure.
+        """
+        if self._export_request_queue is None or self._export_done_queue is None:
+            return False
+
+        # generate a request id (can be timestamp + random)
+        req_id = f"req_{time.time()}_{int(threading.get_ident())}"
+        try:
+            self._export_request_queue.put_nowait((req_id, float(target_ts), str(out_path)))
+        except Exception:
+            # queue full or not available
+            return False
+
+        # wait for done (simple blocking poll with timeout)
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            try:
+                item = self._export_done_queue.get_nowait()
+            except Exception:
+                # nothing yet
+                time.sleep(0.02)
+                continue
+            try:
+                got_id, got_ts, path, success = item
+                if got_id == req_id:
+                    return bool(success)
+            except Exception:
+                continue
+        return False
 
     def start(self):
         # create shared thumb buffer
@@ -519,11 +699,15 @@ class ScreenshotManager:
         self._capture_stop_event = multiprocessing.Event()
 
         # start async capture process
+        self._export_request_queue = multiprocessing.Queue(maxsize=256)
+        self._export_done_queue = multiprocessing.Queue(maxsize=256)
+
+        # start async capture process
         self._capture_process = multiprocessing.Process(
             target=_run_async_capture_process,
             args=(
                 self._capture_meta_queue,
-                self._async_save_queue if self.save_all_buffer else None,
+                self._async_save_queue if self.save_all_buffer else self._async_save_queue,
                 self._ssim_queue if self.log_ssim else None,
                 shm_name,
                 self.thumb_w,
@@ -532,7 +716,9 @@ class ScreenshotManager:
                 self.fps,
                 self._capture_stop_event,
                 self.save_all_buffer,
-                True  # with_cursor
+                True,  # with_cursor
+                self._export_request_queue,
+                self._export_done_queue,
             ),
             daemon=True
         )
@@ -579,6 +765,63 @@ class ScreenshotManager:
         self._reader_thread = threading.Thread(target=reader, daemon=True)
         self._reader_thread.start()
 
+        def ssim_reader():
+            if not self._ssim_out_queue:
+                return
+            import queue as _q
+            while True:
+                try:
+                    entry = self._ssim_out_queue.get(timeout=1.0)
+                except _q.Empty:
+                    if self._capture_stop_event.is_set():
+                        break
+                    continue
+                if entry is None:
+                    break
+                try:
+                    # append to in-memory ssim buffer (thread-safe enough since only this thread writes)
+                    self.ssim_buffer.append(entry)
+                except Exception as e:
+                    print(f"[ssim_reader] error: {e}")
+
+        self._ssim_reader_thread = threading.Thread(target=ssim_reader, daemon=True)
+        if self._ssim_out_queue is not None:
+            self._ssim_reader_thread.start()
+
+    def find_buffer_fullres(self, ts: float):
+        """
+        Try to find an existing full-res buffer file saved by the async save worker.
+        Filenames are 'buffer_active_{ts:.6f}.jpg'. We attempt exact match, then nearest.
+        """
+        if not self.save_all_buffer or not self.buffer_save_dir:
+            return None
+        # exact prefix (string formatting may differ slightly)
+        prefix = f"buffer_active_{ts:.6f}"
+        candidates = list(Path(self.buffer_save_dir).glob(f"{prefix}*.jpg"))
+        if candidates:
+            return str(sorted(candidates)[-1])
+        # fallback: find nearest by timestamp encoded in filenames
+        # list all buffer files and choose nearest numeric timestamp
+        try:
+            files = list(Path(self.buffer_save_dir).glob("buffer_active_*.jpg"))
+            nearest = None
+            best_diff = None
+            for p in files:
+                name = p.name.replace("buffer_active_", "").replace(".jpg", "")
+                try:
+                    file_ts = float(name)
+                    diff = abs(file_ts - ts)
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        nearest = p
+                except Exception:
+                    continue
+            if nearest:
+                return str(nearest)
+        except Exception:
+            pass
+        return None
+
     def stop(self):
         # Stop capture process
         try:
@@ -624,54 +867,3 @@ class ScreenshotManager:
                     self._ssim_process.terminate()
             except Exception as e:
                 print(f"[ScreenshotManager.stop] error stopping SSIM process: {e}")
-
-    def take_screenshot_thumbnail(self):
-        """Get the most recent thumbnail"""
-        with self._lock:
-            if not self.buffer:
-                return None, None
-            f = self.buffer[-1]
-            jpeg_buf = io.BytesIO()
-            f["thumb"].save(jpeg_buf, format="JPEG", quality=85)
-            return jpeg_buf.getvalue(), f["thumb"].size
-
-    def take_virtual_screenshot(self, quality: int = 95):
-        """Take an immediate full-resolution screenshot"""
-        try:
-            cursor_x, cursor_y = self._get_cursor_position()
-            with mss.mss(with_cursor=True) as sct:
-                monitor = None
-                for i, mon in enumerate(sct.monitors[1:], 1):
-                    if (mon["left"] <= cursor_x < mon["left"] + mon["width"] and
-                            mon["top"] <= cursor_y < mon["top"] + mon["height"]):
-                        monitor = mon
-                        break
-                if monitor is None:
-                    monitor = sct.monitors[1]
-
-                shot = sct.grab(monitor)
-                pil_img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-                jpeg_buffer = io.BytesIO()
-                pil_img.save(jpeg_buffer, format="JPEG", quality=quality)
-                return jpeg_buffer.getvalue(), pil_img.size
-        except Exception as e:
-            print(f"[take_virtual_screenshot] error: {e}")
-            return None, None
-
-    def _get_cursor_position(self):
-        try:
-            from pynput.mouse import Controller
-            mouse = Controller()
-            pos = mouse.position
-            return int(pos[0]), int(pos[1])
-        except Exception:
-            try:
-                import tkinter as tk
-                root = tk.Tk()
-                root.withdraw()
-                x = root.winfo_pointerx()
-                y = root.winfo_pointery()
-                root.destroy()
-                return x, y
-            except Exception:
-                return 960, 540

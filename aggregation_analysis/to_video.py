@@ -178,28 +178,19 @@ def create_video_with_ffmpeg(image_dir, output_video_path, fps=3):
     return True
 
 
-def main(create_video=False):
-    """
-    Main processing pipeline.
-    If create_video is True, the script will create a video at output_video path.
-    If create_video is False, the script will write annotated images to annotated_dir.
-    """
-    # Configuration
+def main(session_dir, create_video=False):
     json_file = './aggregation_analysis/aggregated_actions.json'
-    screenshot_dir = './aggregation_analysis/session_6/buffer_screenshots'
+    screenshot_dir = session_dir / 'buffer_screenshots'
     output_video = './aggregation_analysis/video.mp4'
-    annotated_dir = './aggregation_analysis/annotated_imgs'  # where annotated images will be placed if not creating video
+    annotated_dir = './aggregation_analysis/annotated_imgs'
 
-    # Create output directory if it doesn't exist
     output_parent_dir = os.path.dirname(output_video)
     if output_parent_dir and not os.path.exists(output_parent_dir):
         os.makedirs(output_parent_dir, exist_ok=True)
 
-    # Ensure annotated directory exists (we will copy there when not creating a video or always keep annotated images)
     if not os.path.exists(annotated_dir):
         os.makedirs(annotated_dir, exist_ok=True)
 
-    # Check if files/directories exist
     if not os.path.exists(json_file):
         print(f"Error: {json_file} not found")
         return
@@ -304,6 +295,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Create a video from the annotated images. If not set, the script only writes annotated images to annotated_imgs.",
     )
+    parser.add_argument(
+        "--session-dir",
+        type=Path,
+        default=Path("."),
+        help="Path to the session directory containing buffer_screenshots.",
+    )
     args = parser.parse_args()
 
-    main(create_video=args.create_video)
+    main(session_dir=args.session_dir, create_video=args.create_video)

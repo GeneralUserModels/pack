@@ -8,12 +8,10 @@ from typing import List, Dict, Any, Optional
 def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
     """Load JSONL file and return list of dictionaries"""
     data = []
-    base_dir = Path(__file__).parent / "session_6"
-    file_path = base_dir / filepath
-    if not file_path.exists():
-        print(f"Warning: {file_path} does not exist. Returning empty list.")
+    if not filepath.exists():
+        print(f"Warning: {filepath} does not exist. Returning empty list.")
         return data
-    with open(file_path, 'r') as f:
+    with open(filepath, 'r') as f:
         for line in f:
             if line.strip():  # Skip empty lines
                 data.append(json.loads(line))
@@ -146,18 +144,14 @@ def create_regression_dataset(
     similarities_file: str = 'img_similarities.jsonl',
     labels_file: str = 'manual_labels.jsonl',
     output_file: str = 'regression_dataset.json',
-    time_window: float = 5.0  # kept for API compatibility but unused when mapping by intervals
+    time_window: float = 5.0,
+    base_dir: Path = None
 ):
-    """
-    Create regression dataset mapping image similarities to save labels.
 
-    This version maps events to non-overlapping intervals between successive similarity timestamps:
-      events with t_i < event_ts < t_{i+1} are assigned to similarity i.
-    For the last similarity, events after it are included if include_after_last=True.
-    """
-
-    print("Loading data...")
-
+    if base_dir is not None:
+        events_file = base_dir / events_file
+        similarities_file = base_dir / similarities_file
+        labels_file = base_dir / labels_file
     # Load all data
     events_data = load_jsonl(events_file)
     similarities_data = load_jsonl(similarities_file)
@@ -315,49 +309,11 @@ def create_regression_dataset(
     return regression_data
 
 
-def create_features_dataset(regression_data, output_file='features_dataset.json'):
-    """
-    Create a more ML-friendly version with engineered features
-    """
-    features_data = []
-
-    for item in regression_data:
-        input_data = item['input']
-        events = input_data['events']
-
-        # Engineer features from events
-        event_features = {
-            'num_events': len(events),
-            'event_types': {},
-            'time_span': 0,
-            'has_keyboard': False,
-            'has_mouse': False,
-            'has_click': False,
-            'cursor_movement': 0,
-            'avg_time_to_event': 0
-        }
-
-        # Count event types
-        for event_type in ['poll', 'keyboard_press', 'keyboard_release', 'mouse_move', 'mouse_click', 'mouse_down', 'mouse_up']:
-            event_features['event_types'][f'count_{event_type}'] = 0
-
-        if events:
-            # Calculate event statistics
-            event_times = [event['relative_time'] for event in events]
-            event_features['time_span'] = max(event_times) - min(event_times) if len(event_times) > 1 else 0
-            event_features['avg_time_to_event'] = sum(abs(t) for t in event_times) / len(event_times) if event_times else 0
-
-            # Count event types and detect patterns
-            cursor_positions = []
-            for event in events:
-                event_type = event['event_type']
-                if f'count_{event_type}' in event_features['event_types']:
-                    event_features['event_types'][f'count_{event_type}'] += 1
-
-                # Pattern detection
-                if 'keyboard' in event_type:
-                    event_features['has_keyboard'] = True
-                if 'mouse' in event_type:
-                    event_features['has_mouse'] = True
-                if 'click' in event_type or 'down' in event_type or 'up' in event_type:
-                    event_features['has_click'] = Tru
+if __name__ == "__main__":
+    sessions_dir = Path(__file__).parent.parent / "logs"
+    last_session = max((d for d in sessions_dir.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, default=None)
+    regression_data = create_regression_dataset(
+        time_window=5.0,
+        output_file='./aggregation_analysis/regression_dataset.json',
+        base_dir=last_session
+    )

@@ -78,17 +78,10 @@ class InputEventHandler:
         )
 
     def _save_log(self, event_type, details, cursor_pos, timestamp):
-        png, size = None, None
-
-        if png is not None:
-            print(f"Buffered screenshot retrieved for {event_type}")
-        else:
-            print(f"No buffered screenshot available for {event_type}")
-
         self.queue.enqueue(
             event_type=event_type,
             details=details,
             cursor_pos=cursor_pos,
-            screenshot=(png, size) if png is not None else None,
+            screenshot=None,
             timestamp=timestamp
         )

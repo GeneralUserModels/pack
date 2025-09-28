@@ -1,11 +1,12 @@
+import argparse
 import datetime
 import threading
 from pathlib import Path
-from pynput import keyboard, mouse
 from record import EventQueue, io_worker, InputEventHandler, ScreenshotManager
+from record.save_logic import SaveDeciderWorker
 
 stop_event = threading.Event()
-SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v2_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v3_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 SCREENSHOT_DIR = SESSION_DIR / "screenshots"
 BUFFER_SCREENSHOTS_DIR = SESSION_DIR / "buffer_screenshots"
 LOG_FILE = SESSION_DIR / "events.jsonl"
@@ -21,53 +22,60 @@ LOG_SSIM = True
 THUMB_W = 320
 
 
-def main():
+def main(write_all_buffer: bool = False):
     print(f"Session started: {SESSION_DIR}")
-    print(f"Screenshots: {SCREENSHOT_DIR}")
+    print(f"Screenshots directory: {SCREENSHOT_DIR}")
     print(f"Event log: {LOG_FILE}")
-
     if SAVE_ALL_BUFFER:
         BUFFER_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         print(f"Buffer screenshots will be saved to: {BUFFER_SCREENSHOTS_DIR}")
-
     if LOG_SSIM:
-        print(f"SSIM similarities will be logged to: {SSIM_LOG_FILE}")
+        print(f"SSIM will be logged to: {SSIM_LOG_FILE}")
+    print(f"Buffered screenshots at {BUFFER_FPS} FPS, keeping {BUFFER_SECONDS}s in memory")
 
-    print(f"Using buffered screenshots at {BUFFER_FPS} FPS, keeping {BUFFER_SECONDS}s in memory")
+    # Event queue (also holds in-memory time-buffer)
+    event_queue = EventQueue(maxsize=4096, buffer_seconds=BUFFER_SECONDS)
 
-    event_queue = EventQueue(maxsize=1024)
-
-    # Create the ScreenshotManager with the capture-process enabled for reliable 60 FPS
+    # Screenshot manager provides:
+    # - screenshot_manager.buffer: deque of last frames
+    # - screenshot_manager.ssim_buffer: deque of computed ssim entries (forwarded from ssim worker)
     screenshot_manager = ScreenshotManager(
         fps=BUFFER_FPS,
         buffer_seconds=BUFFER_SECONDS,
-        save_all_buffer=SAVE_ALL_BUFFER,
-        buffer_save_dir=BUFFER_SCREENSHOTS_DIR if SAVE_ALL_BUFFER else None,
+        save_all_buffer=write_all_buffer,
+        buffer_save_dir=str(BUFFER_SCREENSHOTS_DIR) if SAVE_ALL_BUFFER else None,
         log_ssim=LOG_SSIM,
-        ssim_log_file=SSIM_LOG_FILE if LOG_SSIM else None,
+        ssim_log_file=str(SSIM_LOG_FILE) if LOG_SSIM else None,
         thumb_w=THUMB_W
     )
 
     screenshot_manager.start()
-    print("Buffered screenshot capture with SSIM logging started")
+    print("ScreenshotManager started (capture + ssim processes)")
 
+    # start io worker (persist events/screenshots as before)
     threading.Thread(target=io_worker, args=(event_queue, SCREENSHOT_DIR, LOG_FILE), daemon=True).start()
 
+    # input handlers which will enqueue events in event_queue
     h = InputEventHandler(event_queue, screenshot_manager)
 
+    # start the SaveDecider worker
+    decider = SaveDeciderWorker(screenshot_manager, event_queue, SCREENSHOT_DIR, stop_event)
+    decider.start()
+    print("SaveDeciderWorker started (heuristic-driven saves)")
+
+    # start input listeners
+    from pynput import keyboard, mouse
     print("Starting input listeners...")
     try:
         with keyboard.Listener(on_press=h.on_press, on_release=h.on_release) as kl, \
                 mouse.Listener(on_click=h.on_click, on_move=h.on_move, on_scroll=h.on_scroll) as ml:
             print("Input listeners active. Press Ctrl+C to stop.")
-            print("SSIM similarities are being calculated and logged in real-time...")
-
             try:
                 while True:
                     if stop_event.wait(timeout=1.0):
                         break
             except KeyboardInterrupt:
-                print("\nReceived interrupt signal...")
+                print("\nReceived interrupt, shutting down...")
                 stop_event.set()
             print("Stopping listeners...")
     except Exception as e:
@@ -76,7 +84,6 @@ def main():
         print("Cleaning up...")
         screenshot_manager.stop()
         try:
-            # if the io_worker uses event_queue.queue.join()
             event_queue.queue.join()
         except Exception as e:
             print(f"Error while waiting for queue to empty: {e}")
@@ -85,6 +92,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # On Windows, multiprocessing uses spawn and will re-import this module, so we must keep
-    # top-level side-effects minimal and only run main here.
-    main()
+    parser = argparse.ArgumentParser(description="Record user input events and screenshots.")
+    parser.add_argument('-b', '--write-all-buffer', action='store_true', help="Do not save buffered screenshots.")
+    args = parser.parse_args()
+    main(args.write_all_buffer)
