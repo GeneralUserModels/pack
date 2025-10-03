@@ -7,14 +7,18 @@ from datetime import datetime
 from pynput import mouse, keyboard
 
 from record.models import EventQueue
-from record.handlers import InputEventHandler, ScreenshotHandler
 from record.workers.save import SaveWorker
+from record.handlers import InputEventHandler, ScreenshotHandler, AggregationHandler
 
 
 class ScreenRecorder:
-    """Main application for recording screen activity."""
 
-    def __init__(self, fps: int = 30, buffer_seconds: int = 6, buffer_all: bool = False):
+    def __init__(
+        self, fps: int = 30,
+        buffer_seconds: int = 12,
+        buffer_all: bool = False,
+        use_aggregation: bool = True,
+    ):
         """
         Initialize the screen recorder.
 
@@ -22,16 +26,18 @@ class ScreenRecorder:
             fps: Frames per second to capture
             buffer_seconds: Number of seconds to keep in buffer
             buffer_all: If True, save all screenshots to disk
+            use_aggregation: If True, use intelligent aggregation to save only important screenshots
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
+        self.use_aggregation = use_aggregation
 
         self.image_buffer_size = fps * buffer_seconds
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v4_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v5_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")
@@ -44,10 +50,22 @@ class ScreenRecorder:
         # Initialize save worker
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
-        # Register callbacks for saving
+        # Register callbacks for saving raw data
         self.input_event_queue.add_callback(self._on_input_event)
         self.ssim_queue.add_callback(self._on_ssim_computed)
+
         self.image_queue.add_callback(self._on_new_image)
+
+        # Initialize aggregation handler if enabled
+        self.aggregation_handler = None
+        if use_aggregation:
+            self.aggregation_handler = AggregationHandler(
+                image_queue=self.image_queue,
+                ssim_queue=self.ssim_queue,
+                input_event_queue=self.input_event_queue,
+                save_worker=self.save_worker,
+                queue_size=self.image_buffer_size,
+            )
 
         # Initialize input event handler
         self.input_handler = InputEventHandler(self.input_event_queue)
@@ -75,7 +93,7 @@ class ScreenRecorder:
         self.save_worker.save_ssim_value(image)
 
     def _on_new_image(self, image):
-        """Callback for saving all buffer images."""
+        """Callback for saving all buffer images (only used if buffer_all and no aggregation)."""
         self.save_worker.save_buffer_image(image)
 
     def start(self):
@@ -87,9 +105,14 @@ class ScreenRecorder:
         self.running = True
         print(f"Starting screen recorder at {self.fps} FPS")
         print(f"Buffer: {self.buffer_seconds} seconds ({self.image_buffer_size} frames)")
-        print(f"Save all images: {self.buffer_all}")
+        print("Aggregation: DISABLED")
+        print(f"  - Save all images: {self.buffer_all}")
 
         self.screenshot_manager.start()
+
+        # Start aggregation handler if enabled
+        if self.aggregation_handler:
+            self.aggregation_handler.start()
 
         self.mouse_listener = mouse.Listener(
             on_move=self.input_handler.on_move,
@@ -113,6 +136,10 @@ class ScreenRecorder:
 
         print("\nStopping recorder...")
         self.running = False
+
+        # Stop aggregation handler first to process remaining screenshots
+        if self.aggregation_handler:
+            self.aggregation_handler.stop()
 
         self.screenshot_manager.stop()
 
@@ -153,19 +180,24 @@ def main():
     parser.add_argument(
         "-f", "--fps",
         type=int,
-        default=30,
+        default=16,
         help="Frames per second to capture (default: 30)"
     )
     parser.add_argument(
         "-s", "--buffer-seconds",
         type=int,
-        default=6,
+        default=12,
         help="Number of seconds to keep in buffer (default: 6)"
     )
     parser.add_argument(
         "-b", "--buffer-all-images",
         action="store_true",
-        help="Save all buffer images to disk"
+        help="Save all buffer images to disk (only applies if aggregation is disabled)"
+    )
+    parser.add_argument(
+        "--no-aggregation",
+        action="store_true",
+        help="Disable intelligent aggregation (save all or no screenshots based on -b flag)"
     )
 
     args = parser.parse_args()
@@ -173,7 +205,8 @@ def main():
     recorder = ScreenRecorder(
         fps=args.fps,
         buffer_seconds=args.buffer_seconds,
-        buffer_all=args.buffer_all_images
+        buffer_all=args.buffer_all_images,
+        use_aggregation=not args.no_aggregation,
     )
     recorder.run()
 

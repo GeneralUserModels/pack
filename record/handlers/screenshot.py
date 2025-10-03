@@ -1,6 +1,8 @@
 import time
 import threading
 from typing import Optional
+from pynput import mouse
+import mss
 from record.models.event_queue import EventQueue
 from record.models.image import BufferImage
 from record.workers.screenshot import capture_screenshot
@@ -34,7 +36,7 @@ class ScreenshotHandler:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._previous_image: Optional[BufferImage] = None
-
+        self.mouse_controller = mouse.Controller()
         # Register callback for SSIM computation
         self.image_queue.add_callback(self._on_new_image)
 
@@ -84,29 +86,30 @@ class ScreenshotHandler:
 
     def _capture_loop(self) -> None:
         """Main loop for capturing screenshots."""
-        while self._running:
-            start_time = time.time()
+        with mss.mss() as sct:
+            while self._running:
+                start_time = time.time()
 
-            try:
-                # Capture screenshot
-                timestamp = time.time()
-                screenshot = capture_screenshot(self.monitor_index)
+                try:
+                    x, y = self.mouse_controller.position
+                    timestamp = time.time()
+                    screenshot, monitor_index = capture_screenshot(sct, x, y)
 
-                if screenshot is not None:
-                    # Create BufferImage
-                    buffer_image = BufferImage(
-                        timestamp=timestamp,
-                        screenshot=screenshot,
-                        monitor_index=self.monitor_index if self.monitor_index is not None else 0
-                    )
+                    if screenshot is not None:
+                        # Create BufferImage
+                        buffer_image = BufferImage(
+                            timestamp=timestamp,
+                            screenshot=screenshot,
+                            monitor_index=monitor_index
+                        )
 
-                    self.image_queue.enqueue(buffer_image)
-            except Exception as e:
-                print(f"Error capturing screenshot: {e}")
+                        self.image_queue.enqueue(buffer_image)
+                except Exception as e:
+                    print(f"Error capturing screenshot: {e}")
 
-            elapsed = time.time() - start_time
-            sleep_time = max(0, self.interval - elapsed)
-            time.sleep(sleep_time)
+                elapsed = time.time() - start_time
+                sleep_time = max(0, self.interval - elapsed)
+                time.sleep(sleep_time)
 
     def start(self) -> None:
         """Start capturing screenshots."""

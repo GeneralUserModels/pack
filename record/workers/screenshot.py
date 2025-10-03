@@ -1,53 +1,50 @@
 import numpy as np
 from typing import Optional
-import mss
-from pynput import mouse
-from screeninfo import get_monitors
 
 
-def get_active_monitor() -> int:
+def is_active_monitor(mon: dict, x: int, y: int) -> bool:
+    """Check if coordinates are within monitor bounds"""
+    return (mon["left"] <= x < mon["left"] + mon["width"] and
+            mon["top"] <= y < mon["top"] + mon["height"])
+
+
+def get_active_monitor(x: int, y: int, sct) -> int:
     """
-    Get the index of the monitor where the cursor is currently located.
-
-    Returns:
-        Monitor index (0-based)
+    Return the monitor index in sct.monitors that contains (x, y).
+    sct.monitors[0] is the virtual/all-monitors image, physical monitors are 1..N.
+    Returns an index suitable for sct.monitors (0..N).
     """
-    def in_bounds(x: int, y: int, monitor) -> bool:
-        return (monitor.x <= x < monitor.x + monitor.width and monitor.y <= y < monitor.y + monitor.height)
+    # ensure ints
+    x = int(x)
+    y = int(y)
 
+    for i, mon in enumerate(sct.monitors[1:], start=1):
+        if is_active_monitor(mon, x, y):
+            return i
+
+    return 0
+
+
+def capture_screenshot(sct, x: int, y: int) -> Optional[np.ndarray]:
     try:
-        controller = mouse.Controller()
-        x, y = controller.position
+        x = int(x)
+        y = int(y)
 
-        monitors = list(get_monitors())
+        monitor_index = get_active_monitor(x, y, sct)
 
-        for idx, monitor in enumerate(monitors):
-            if in_bounds(x, y, monitor):
-                return idx
+        max_idx = len(sct.monitors) - 1  # highest physical index; index 0 is allowed too
+        if monitor_index < 0:
+            monitor_index = 0
+        elif monitor_index > max_idx:
+            monitor_index = max_idx
 
-        return 0
-    except Exception as e:
-        print(f"Error getting active monitor: {e}")
-        return 0
+        monitor = sct.monitors[monitor_index]
+        screenshot = sct.grab(monitor)
 
+        img = np.array(screenshot)
+        img_rgb = img[:, :, [2, 1, 0]]
 
-def capture_screenshot(monitor_index: Optional[int] = None) -> Optional[np.ndarray]:
-    try:
-        with mss.mss() as sct:
-            # If no monitor specified, get the active one
-            if monitor_index is None:
-                monitor_index = get_active_monitor()
-
-            monitor = sct.monitors[monitor_index + 1]
-
-            screenshot = sct.grab(monitor)
-
-            # Convert to numpy array (BGRA format from mss)
-            img = np.array(screenshot)
-            # Convert BGRA to RGB
-            img_rgb = img[:, :, [2, 1, 0]]
-
-            return img_rgb
+        return img_rgb, monitor_index
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
-        return None
+        return None, None
