@@ -42,14 +42,12 @@ class ScreenRecorder:
         self.ssim_queue = EventQueue(max_length=self.image_buffer_size)
 
         # Initialize save worker
-        self.save_worker = SaveWorker(self.session_dir)
+        self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
         # Register callbacks for saving
         self.input_event_queue.add_callback(self._on_input_event)
         self.ssim_queue.add_callback(self._on_ssim_computed)
-
-        if self.buffer_all:
-            self.image_queue.add_callback(self._on_new_image)
+        self.image_queue.add_callback(self._on_new_image)
 
         # Initialize input event handler
         self.input_handler = InputEventHandler(self.input_event_queue)
@@ -78,8 +76,7 @@ class ScreenRecorder:
 
     def _on_new_image(self, image):
         """Callback for saving all buffer images."""
-        if self.buffer_all:
-            self.save_worker.save_buffer_image(image)
+        self.save_worker.save_buffer_image(image)
 
     def start(self):
         """Start recording."""

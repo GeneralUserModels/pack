@@ -6,7 +6,7 @@ from enum import Enum
 class EventType(Enum):
     MOUSE_DOWN = "mouse_down"
     MOUSE_UP = "mouse_up"
-    MOUSE_MOVE = "mouse_click"
+    MOUSE_MOVE = "mouse_move"
     MOUSE_SCROLL = "mouse_scroll"
     KEY_PRESS = "key_press"
     KEY_RELEASE = "key_release"

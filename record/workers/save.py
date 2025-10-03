@@ -8,7 +8,7 @@ from record.models.event import InputEvent
 class SaveWorker:
     """Worker for saving queue items to disk."""
 
-    def __init__(self, session_dir: Path):
+    def __init__(self, session_dir: Path, buffer_all: bool = False):
         """
         Initialize the save worker.
 
@@ -18,6 +18,7 @@ class SaveWorker:
         self.session_dir = Path(session_dir)
         self.screenshots_dir = self.session_dir / "screenshots"
         self.buffer_imgs_dir = self.session_dir / "buffer_imgs"
+        self.buffer_all = buffer_all
 
         # Create directories
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -75,25 +76,17 @@ class SaveWorker:
             Path to saved image
         """
         try:
-            # Determine save directory
             save_dir = self.buffer_imgs_dir if buffer_dir else self.screenshots_dir
-
-            # Generate filename
-            filename = f"{image.timestamp:.6f}_monitor{image.monitor_index}.jpg"
+            filename = f"{image.timestamp:.6f}_monitor_{image.monitor_index}.jpg"
             filepath = save_dir / filename
+            if self.buffer_all:
+                img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-            # Convert RGB to BGR for OpenCV
-            img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
-
-            # Save image
-            cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-            # Log metadata
             metadata = {
                 'timestamp': image.timestamp,
                 'path': str(filepath.relative_to(self.session_dir)),
                 'monitor_index': image.monitor_index,
-                'ssim_value': image.ssim_value
             }
 
             with open(self.screenshot_log, 'a') as f:
