@@ -1,123 +1,296 @@
 import threading
-from typing import List, Callable, Optional, Any
+import time
+from typing import List, Callable, Optional
 from collections import deque
-import bisect
+from dataclasses import dataclass
+from record.models.event import InputEvent, EventType
+
+
+@dataclass
+class AggregationConfig:
+    gap_threshold: float  # Max time gap between consecutive events (seconds)
+    total_threshold: float  # Max time span from first to last event (seconds)
+
+
+@dataclass
+class AggregationRequest:
+    """Represents a request for a screenshot at a specific time."""
+    timestamp: float
+    reason: str  # e.g., "keyboard_start", "mouse_move_end"
+    event_type: str  # e.g., "key", "move"
+    is_start: bool  # True for start, False for end
 
 
 class EventQueue:
-    """Thread-safe circular queue with timestamp-based retrieval."""
 
-    def __init__(self, max_length: int):
+    def __init__(
+        self,
+        click_config: Optional[AggregationConfig] = None,
+        move_config: Optional[AggregationConfig] = None,
+        scroll_config: Optional[AggregationConfig] = None,
+        key_config: Optional[AggregationConfig] = None,
+        poll_interval: float = 1.0
+    ):
         """
-        Initialize the event queue.
+        Initialize the input event queue.
 
         Args:
-            max_length: Maximum number of items to store in the circular buffer
+            click_config: Configuration for click event aggregation
+            move_config: Configuration for move event aggregation
+            scroll_config: Configuration for scroll event aggregation
+            key_config: Configuration for key event aggregation
+            poll_interval: Interval in seconds for polling worker
         """
-        self.max_length = max_length
-        self._queue = deque(maxlen=max_length)
+        self.configs = {
+            'click': click_config or AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
+            'move': move_config or AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
+            'scroll': scroll_config or AggregationConfig(gap_threshold=0.3, total_threshold=1.5),
+            'key': key_config or AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
+        }
+
+        # Aggregation queues for each event type
+        self.aggregations = {
+            'click': deque(),
+            'move': deque(),
+            'scroll': deque(),
+            'key': deque(),
+        }
+
+        # Queue to store ALL input events
+        self.all_events = deque()
+
+        # Queue to store aggregation requests (screenshot requests)
+        self.aggregation_requests = deque()
+
+        # List of ready aggregation requests to be processed by callback
+        self.final_aggregations = []
+
+        # Time threshold - we can safely aggregate events older than this
+        self.safe_aggregation_time = 0.0
+
+        # Event type mapping
+        self.event_type_mapping = {
+            EventType.MOUSE_DOWN: 'click',
+            EventType.MOUSE_UP: 'click',
+            EventType.MOUSE_MOVE: 'move',
+            EventType.MOUSE_SCROLL: 'scroll',
+            EventType.KEY_PRESS: 'key',
+            EventType.KEY_RELEASE: 'key',
+        }
+
         self._lock = threading.RLock()
-        self._callbacks: List[Callable[[Any], None]] = []
+        self._callback: Optional[Callable[[str, List[InputEvent]], None]] = None
+        self._aggregation_callback: Optional[Callable[[List[AggregationRequest]], None]] = None
 
-    def enqueue(self, item: Any) -> None:
+        # Polling worker
+        self.poll_interval = poll_interval
+        self._running = False
+        self._poll_thread = None
+
+    def set_callback(self, callback: Callable[[str, List[InputEvent]], None]) -> None:
         """
-        Add an item to the queue and trigger callbacks.
+        Set the callback function for processed aggregated events.
 
         Args:
-            item: Item to add (must have a timestamp attribute)
+            callback: Function that takes (event_type_str, events_list)
         """
         with self._lock:
-            # Insert in sorted order
-            if not self._queue or item.timestamp >= self._queue[-1].timestamp:
-                self._queue.append(item)
+            self._callback = callback
+
+    def set_aggregation_callback(
+        self,
+        callback: Callable[[List[AggregationRequest]], None]
+    ) -> None:
+        """
+        Set the callback function for ready aggregation requests.
+
+        Args:
+            callback: Function that takes a list of AggregationRequest objects
+        """
+        with self._lock:
+            self._aggregation_callback = callback
+
+    def enqueue(self, event: InputEvent) -> None:
+        """
+        Add an event to the appropriate aggregation queue and all_events queue.
+
+        Args:
+            event: Input event to add
+        """
+        with self._lock:
+            # Add to all_events queue
+            self.all_events.append(event)
+
+            # Get the aggregation type
+            agg_type = self.event_type_mapping.get(event.event_type)
+            if agg_type is None:
+                return
+
+            queue = self.aggregations[agg_type]
+            config = self.configs[agg_type]
+
+            # If queue is empty, just add the event
+            if not queue:
+                queue.append(event)
+                return
+
+            last_event = queue[-1]
+            first_event = queue[0]
+
+            gap_diff = event.timestamp - last_event.timestamp
+            total_diff = event.timestamp - first_event.timestamp
+
+            # Check conditions
+            gap_ok = gap_diff <= config.gap_threshold
+            total_ok = total_diff <= config.total_threshold
+
+            if gap_ok and total_ok:
+                # Both conditions met: just append
+                queue.append(event)
+            elif not gap_ok:
+                # Gap too large: process current aggregation and start new one
+                self._process_aggregation(agg_type, list(queue))
+                queue.clear()
+                queue.append(event)
+            else:  # not total_ok
+                # Total span too large: split and process half
+                queue_list = list(queue)
+                mid_timestamp = (first_event.timestamp + last_event.timestamp) / 2
+
+                # Split based on timestamp
+                first_half = [e for e in queue_list if e.timestamp <= mid_timestamp]
+                second_half = [e for e in queue_list if e.timestamp > mid_timestamp]
+
+                # Process first half
+                if first_half:
+                    self._process_aggregation(agg_type, first_half)
+
+                # Keep second half and add new event
+                queue.clear()
+                queue.extend(second_half)
+                queue.append(event)
+
+    def _process_aggregation(self, agg_type: str, events: List[InputEvent]) -> None:
+        """
+        Process an aggregated event batch by creating aggregation requests.
+
+        Args:
+            agg_type: Type of aggregation ('click', 'move', 'scroll', 'key')
+            events: List of events to process
+        """
+        if not events:
+            return
+
+        # Create start and end aggregation requests
+        start_request = AggregationRequest(
+            timestamp=events[0].timestamp,
+            reason=f"{agg_type}_start",
+            event_type=agg_type,
+            is_start=True
+        )
+
+        end_request = AggregationRequest(
+            timestamp=events[-1].timestamp,
+            reason=f"{agg_type}_end",
+            event_type=agg_type,
+            is_start=False
+        )
+
+        self.aggregation_requests.append(start_request)
+        self.aggregation_requests.append(end_request)
+
+        # Call the original callback if set
+        if self._callback:
+            try:
+                self._callback(agg_type, events)
+            except Exception as e:
+                print(f"Error in aggregation callback for {agg_type}: {e}")
+
+    def _poll_worker(self) -> None:
+        """Worker thread that polls for stale aggregations and processes ready requests."""
+        while self._running:
+            time.sleep(self.poll_interval)
+
+            with self._lock:
+                current_time = time.time()
+
+                for agg_type, queue in self.aggregations.items():
+                    if not queue:
+                        continue
+
+                    config = self.configs[agg_type]
+                    last_event = queue[-1]
+                    time_since_last = current_time - last_event.timestamp
+
+                    if time_since_last > config.gap_threshold:
+                        self._process_aggregation(agg_type, list(queue))
+                        queue.clear()
+
+                max_threshold = max(cfg.gap_threshold for cfg in self.configs.values()) + 1
+                self.safe_aggregation_time = current_time - max_threshold
+
+                self._prepare_final_aggregations()
+
+    def _prepare_final_aggregations(self) -> None:
+        """
+        Move aggregation requests that are ready to final_aggregations list
+        and trigger callback.
+        """
+        if not self.aggregation_requests:
+            return
+
+        # Find all requests that are safe to process
+        ready_requests = []
+        remaining_requests = deque()
+
+        for req in self.aggregation_requests:
+            if req.timestamp <= self.safe_aggregation_time:
+                ready_requests.append(req)
             else:
-                # Convert to list, insert, and recreate deque
-                temp_list = list(self._queue)
-                idx = bisect.bisect_left([x.timestamp for x in temp_list], item.timestamp)
-                temp_list.insert(idx, item)
-                self._queue = deque(temp_list[-self.max_length:], maxlen=self.max_length)
+                remaining_requests.append(req)
 
-            # Trigger callbacks
-            for callback in self._callbacks:
-                try:
-                    callback(item)
-                except Exception as e:
-                    print(f"Error in callback: {e}")
+        self.aggregation_requests = remaining_requests
 
-    def get_entries_before(self, timestamp: float, milliseconds: int) -> List[Any]:
-        """
-        Get all entries within X milliseconds before the given timestamp.
+        if not ready_requests:
+            return
 
-        Args:
-            timestamp: Reference timestamp
-            milliseconds: Time window in milliseconds
+        # Sort requests by timestamp
+        ready_requests.sort(key=lambda r: r.timestamp)
 
-        Returns:
-            List of items within the time window
-        """
+        # Add to final_aggregations and trigger callback
+        self.final_aggregations.extend(ready_requests)
+
+        if self._aggregation_callback:
+            try:
+                self._aggregation_callback(list(ready_requests))
+            except Exception as e:
+                print(f"Error in aggregation callback: {e}")
+
+    def start(self) -> None:
+        """Start the polling worker."""
         with self._lock:
-            start_time = timestamp - (milliseconds / 1000.0)
-            return [item for item in self._queue
-                    if start_time <= item.timestamp <= timestamp]
+            if self._running:
+                return
 
-    def get_entries_after(self, timestamp: float, milliseconds: int) -> List[Any]:
-        """
-        Get all entries within X milliseconds after the given timestamp.
+            self._running = True
+            self._poll_thread = threading.Thread(target=self._poll_worker, daemon=True)
+            self._poll_thread.start()
 
-        Args:
-            timestamp: Reference timestamp
-            milliseconds: Time window in milliseconds
-
-        Returns:
-            List of items within the time window
-        """
+    def stop(self) -> None:
+        """Stop the polling worker and process all remaining aggregations."""
         with self._lock:
-            end_time = timestamp + (milliseconds / 1000.0)
-            return [item for item in self._queue
-                    if timestamp <= item.timestamp <= end_time]
+            self._running = False
 
-    def get_latest(self) -> Optional[Any]:
-        """
-        Get the most recent item from the queue.
+            # Process all remaining aggregations
+            for agg_type, queue in self.aggregations.items():
+                if queue:
+                    self._process_aggregation(agg_type, list(queue))
+                    queue.clear()
 
-        Returns:
-            The latest item or None if queue is empty
-        """
-        with self._lock:
-            return self._queue[-1] if self._queue else None
+            # Update safe time to current time and process all remaining requests
+            self.safe_aggregation_time = time.time()
+            self._prepare_final_aggregations()
 
-    def add_callback(self, callback: Callable[[Any], None]) -> None:
-        """
-        Register a callback to be called when new items are added.
-
-        Args:
-            callback: Function to call with the new item
-        """
-        with self._lock:
-            self._callbacks.append(callback)
-
-    def remove_callback(self, callback: Callable[[Any], None]) -> None:
-        """
-        Remove a registered callback.
-
-        Args:
-            callback: Function to remove
-        """
-        with self._lock:
-            if callback in self._callbacks:
-                self._callbacks.remove(callback)
-
-    def get_all(self) -> List[Any]:
-        """Get all items in the queue."""
-        with self._lock:
-            return list(self._queue)
-
-    def clear(self) -> None:
-        """Clear all items from the queue."""
-        with self._lock:
-            self._queue.clear()
-
-    def __len__(self) -> int:
-        """Get the current size of the queue."""
-        with self._lock:
-            return len(self._queue)
+        # Wait for poll thread to finish
+        if self._poll_thread and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=2.0)
