@@ -4,7 +4,6 @@ version = "0.1.0"
 description = ""
 requires-python = ">=3.11,<=3.13"
 dependencies = [
-    "pynput (>=1.8.1,<2.0.0)",
     "mss (>=10.0.0,<11.0.0)",
     "numpy (>=2.3.1,<3.0.0)",
     "opencv-python (>=4.11.0.86,<5.0.0.0)",
@@ -22,6 +21,8 @@ dependencies = [
     "imageio>=2.37.0",
     "streamlit>=1.50.0",
     "screeninfo>=0.8.1",
+    "pynput>=1.8.1",
+    "scikit-image>=0.25.2",
 ]
 
 [tool.uv]

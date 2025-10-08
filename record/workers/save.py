@@ -26,7 +26,6 @@ class SaveWorker:
         self.buffer_imgs_dir.mkdir(exist_ok=True)
 
         # File paths for JSONL logs
-        self.ssim_log = self.session_dir / "ssim.jsonl"
         self.input_log = self.session_dir / "input_events.jsonl"
         self.screenshot_log = self.session_dir / "screenshots.jsonl"
 
@@ -43,26 +42,6 @@ class SaveWorker:
                 f.write('\n')
         except Exception as e:
             print(f"Error saving input event: {e}")
-
-    def save_ssim_value(self, image: BufferImage) -> None:
-        """
-        Save SSIM value to JSONL.
-
-        Args:
-            image: BufferImage containing SSIM value
-        """
-        try:
-            if image.ssim_value is not None:
-                data = {
-                    'timestamp': image.timestamp,
-                    'ssim_value': image.ssim_value,
-                    'monitor_index': image.monitor_index
-                }
-                with open(self.ssim_log, 'a') as f:
-                    json.dump(data, f)
-                    f.write('\n')
-        except Exception as e:
-            print(f"Error saving SSIM value: {e}")
 
     def save_image(self, image: BufferImage, buffer_dir: bool = False, force_save: bool = False) -> str:
         """

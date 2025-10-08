@@ -1,5 +1,6 @@
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple
+from PIL import Image
 
 
 def is_active_monitor(mon: dict, x: int, y: int) -> bool:
@@ -14,7 +15,6 @@ def get_active_monitor(x: int, y: int, sct) -> int:
     sct.monitors[0] is the virtual/all-monitors image, physical monitors are 1..N.
     Returns an index suitable for sct.monitors (0..N).
     """
-    # ensure ints
     x = int(x)
     y = int(y)
 
@@ -25,14 +25,44 @@ def get_active_monitor(x: int, y: int, sct) -> int:
     return 0
 
 
-def capture_screenshot(sct, x: int, y: int) -> Optional[np.ndarray]:
+def _resize_to_fhd_if_needed(img_rgb: np.ndarray, portrait_fhd=(1080, 1920), landscape_fhd=(1920, 1080)) -> np.ndarray:
+    """
+    Resize (downscale only) a HxWx3 uint8 RGB numpy image so it fits within the appropriate
+    FullHD box depending on orientation. Returns the (possibly) resized image.
+    """
+    h, w = img_rgb.shape[:2]
+
+    if w >= h:
+        target_w, target_h = landscape_fhd
+    else:
+        target_w, target_h = portrait_fhd
+
+    scale = min(target_w / w, target_h / h, 1.0)
+
+    if scale >= 1.0:
+        return img_rgb
+
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+
+    pil = Image.fromarray(img_rgb)
+    pil_resized = pil.resize((new_w, new_h), Image.LANCZOS)
+    return np.asarray(pil_resized)
+
+
+def capture_screenshot(sct, x: int, y: int, scale_to_fhd: bool = False) -> Tuple[Optional[np.ndarray], Optional[int]]:
+    """
+    Capture a screenshot from sct that contains (x, y).
+    If scale_to_fhd is True, downscale the image to Full HD (landscape 1920x1080 or portrait 1080x1920)
+    while preserving aspect ratio. Returns (img_rgb, monitor_index) or (None, None) on error.
+    """
     try:
         x = int(x)
         y = int(y)
 
         monitor_index = get_active_monitor(x, y, sct)
 
-        max_idx = len(sct.monitors) - 1  # highest physical index; index 0 is allowed too
+        max_idx = len(sct.monitors) - 1
         if monitor_index < 0:
             monitor_index = 0
         elif monitor_index > max_idx:
@@ -43,6 +73,9 @@ def capture_screenshot(sct, x: int, y: int) -> Optional[np.ndarray]:
 
         img = np.array(screenshot)
         img_rgb = img[:, :, [2, 1, 0]]
+
+        if scale_to_fhd:
+            img_rgb = _resize_to_fhd_if_needed(img_rgb)
 
         return img_rgb, monitor_index
     except Exception as e:

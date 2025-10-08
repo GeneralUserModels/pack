@@ -2,6 +2,7 @@ import argparse
 import time
 import signal
 import sys
+import threading
 from pathlib import Path
 from datetime import datetime
 from pynput import mouse, keyboard
@@ -9,6 +10,7 @@ from pynput import mouse, keyboard
 from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
+from record.monitor import RealtimeVisualizer
 
 
 class ScreenRecorder:
@@ -16,7 +18,8 @@ class ScreenRecorder:
     def __init__(
         self, fps: int = 30,
         buffer_seconds: int = 12,
-        buffer_all: bool = False
+        buffer_all: bool = False,
+        monitor: bool = False
     ):
         """
         Initialize the screen recorder.
@@ -51,7 +54,6 @@ class ScreenRecorder:
         print(f"Session directory: {self.session_dir}")
 
         self.image_queue = ImageQueue(max_length=self.image_buffer_size)
-        self.ssim_queue = ImageQueue(max_length=self.image_buffer_size)
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
@@ -61,84 +63,66 @@ class ScreenRecorder:
             save_worker=self.save_worker,
         )
 
-        # Set callbacks
         self.input_event_queue.set_callback(self._on_aggregated_events)
         self.input_event_queue.set_aggregation_callback(self._on_aggregation_requests)
 
-        self.ssim_queue.add_callback(self._on_ssim_computed)
         self.image_queue.add_callback(self._on_new_image)
 
         self.input_handler = InputEventHandler(self.input_event_queue)
 
         self.screenshot_manager = ScreenshotHandler(
             image_queue=self.image_queue,
-            ssim_queue=self.ssim_queue,
             fps=self.fps
         )
 
-        # Input listeners
         self.mouse_listener = None
         self.keyboard_listener = None
 
-        # Running flag
         self.running = False
-
-        # Statistics
         self.processed_aggregations = 0
 
-    def _on_aggregated_events(self, event_type: str, events: list):
-        """
-        Callback for aggregated events (intermediate step).
+        self.monitor_thread = None
+        if monitor:
+            self._setup_monitor()
 
-        Args:
-            event_type: Type of aggregation ('click', 'move', 'scroll', 'key')
-            events: List of aggregated events
-        """
+    def _on_aggregated_events(self, event_type: str, events: list):
         print(f"Aggregated {event_type} burst: {len(events)} events "
               f"({events[0].timestamp:.3f} -> {events[-1].timestamp:.3f})")
 
     def _on_aggregation_requests(self, requests: list):
-        """
-        Callback for ready aggregation requests.
-        This is called by the EventQueue poll worker when aggregations are ready.
-
-        Args:
-            requests: List of AggregationRequest objects
-        """
         if not requests:
             return
 
         print(f"\nProcessing {len(requests)} aggregation requests...")
 
-        # Process aggregations using the aggregation worker
         processed = self.aggregation_worker.process_aggregations(requests)
 
-        # Log results
         for agg in processed:
             screenshot_status = "✓" if agg.screenshot else "✗"
             path_info = f"-> {agg.screenshot_path}" if agg.screenshot_path else ""
-            print(f"  {screenshot_status} {agg.request.reason:20s} @ {agg.request.timestamp:.3f} "
+            print(f"  {screenshot_status} {agg.request.reason:20s}"
                   f"| {len(agg.events)} events {path_info}")
 
         self.processed_aggregations += len(processed)
 
-        # Clean up old events to prevent memory growth
         if requests:
             oldest_timestamp = requests[0].timestamp
             self.aggregation_worker.cleanup_old_events(oldest_timestamp)
-
-        # Here you can add your custom logic to save the processed aggregations
-        # For now, they are just logged
-        # Future: self._save_aggregations(processed)
-
-    def _on_ssim_computed(self, image):
-        """Callback for saving SSIM values."""
-        self.save_worker.save_ssim_value(image)
 
     def _on_new_image(self, image):
         """Callback for saving all buffer images (only used if buffer_all)."""
         if self.buffer_all:
             self.save_worker.save_buffer_image(image)
+
+    def _setup_monitor(self):
+        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+        self.monitor_thread.start()
+
+    def _run_monitor(self):
+        events_path = self.session_dir / "events.jsonl"
+        aggr_path = self.session_dir / "aggregations.jsonl"
+        rv = RealtimeVisualizer(events_path, aggr_path, refresh_hz=16, window_s=30.0)
+        rv.run()
 
     def start(self):
         """Start recording."""
@@ -180,10 +164,11 @@ class ScreenRecorder:
         print("\nStopping recorder...")
         self.running = False
 
-        # Stop input event queue (this will process remaining aggregations)
         self.input_event_queue.stop()
 
         self.screenshot_manager.stop()
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=1.0)
 
         if self.mouse_listener:
             self.mouse_listener.stop()
@@ -213,7 +198,7 @@ class ScreenRecorder:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Record screen activity with input events and SSIM metrics"
+        description="Record screen activity with input events"
     )
     parser.add_argument(
         "-f", "--fps",
@@ -232,13 +217,19 @@ def main():
         action="store_true",
         help="Save all buffer images to disk"
     )
+    parser.add_argument(
+        "-m", "--monitor",
+        action="store_true",
+        help="Enable real-time monitoring of the last session"
+    )
 
     args = parser.parse_args()
 
     recorder = ScreenRecorder(
         fps=args.fps,
         buffer_seconds=args.buffer_seconds,
-        buffer_all=args.buffer_all_images
+        buffer_all=args.buffer_all_images,
+        monitor=args.monitor
     )
     recorder.run()
 

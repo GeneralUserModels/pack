@@ -1,9 +1,6 @@
-import sys
 import time
 import json
 import ast
-import os
-from pathlib import Path
 from collections import deque, defaultdict
 from typing import Deque, Dict, List, Optional
 
@@ -11,72 +8,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-# -------- CONFIG --------
-REFRESH_HZ = 16                      # draws per second
-WINDOW_SECONDS = 30.0                # how many seconds to show in the moving window
-MAX_EVENTS = 10000                   # internal cap
-MAX_BURSTS = 500                     # internal cap
-EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}  # y positions
+from record.monitor.reader import TailReader
+
+MAX_EVENTS = 10000
+MAX_BURSTS = 500
+EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}
 EVENT_COLOR = {'key': 'tab:purple', 'click': 'tab:red', 'move': 'tab:green', 'scroll': 'tab:orange'}
 MARKER_SIZE = 24
-# ------------------------
-
-
-class TailReader:
-    """Simple tail that keeps a file handle and last position, recovers when file truncated."""
-
-    def __init__(self, path: str, from_start: bool = True):
-        self.path = path
-        self.f = open(path, "r", encoding="utf-8", errors="ignore")
-        if not from_start:
-            self.f.seek(0, os.SEEK_END)
-        self.pos = self.f.tell()
-
-    def read_new_lines(self) -> List[str]:
-        """Read newly appended lines (non-blocking)."""
-        try:
-            self.f.seek(self.pos)
-            lines = []
-            while True:
-                line = self.f.readline()
-                if not line:
-                    break
-                # strip trailing newline but keep content
-                lines.append(line.rstrip("\n\r"))
-            self.pos = self.f.tell()
-            # handle truncation (e.g., log rotation): if file size < pos -> reopen
-            try:
-                if os.stat(self.path).st_size < self.pos:
-                    self.f.close()
-                    self.f = open(self.path, "r", encoding="utf-8", errors="ignore")
-                    self.pos = self.f.tell()
-            except FileNotFoundError:
-                # file disappeared; attempt to reopen next time
-                self.f.close()
-                self.f = open(self.path, "r", encoding="utf-8", errors="ignore")
-                self.pos = self.f.tell()
-            return lines
-        except Exception:
-            # try to recover by reopening
-            try:
-                self.f.close()
-            except Exception:
-                pass
-            self.f = open(self.path, "r", encoding="utf-8", errors="ignore")
-            self.pos = self.f.tell()
-            return []
 
 
 class RealtimeVisualizer:
-    def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = REFRESH_HZ, window_s: float = WINDOW_SECONDS):
+    def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = 16, window_s: float = 30.0):
         self.events_reader = TailReader(events_path, from_start=True)
         self.aggr_reader = TailReader(aggr_path, from_start=True)
 
-        # histories as deques of dicts
         self.events: Deque[Dict] = deque(maxlen=MAX_EVENTS)
         self.bursts: Deque[Dict] = deque(maxlen=MAX_BURSTS)
 
-        # pending aggregation starts keyed by event_type -> list of start entries
         self.pending_starts: Dict[str, List[Dict]] = defaultdict(list)
 
         self.start_time: Optional[float] = None
@@ -84,21 +32,17 @@ class RealtimeVisualizer:
         self.window_s = window_s
         self.interval_ms = int(1000.0 / refresh_hz)
 
-        # matplotlib setup - single axes for both events and aggregations
         plt.rcParams["toolbar"] = "toolbar2"
         self.fig, self.ax = plt.subplots(figsize=(12, 5))
         self.fig.suptitle("Realtime Input Visualizer (events + aggregations)")
-        # set y ticks using EVENT_Y sorted by value descending so labels align naturally
         self.ax.set_yticks(list(EVENT_Y.values()))
         self.ax.set_yticklabels(list(EVENT_Y.keys()))
         self.ax.set_ylim(-0.5, max(EVENT_Y.values()) + 0.5)
         self.ax.set_ylabel("Event Type")
         self.ax.set_xlabel("Time (s) relative")
 
-        # scatter placeholder - not required but kept for compatibility
         self.scatter = None
 
-        # visual tuning
         self.ax.grid(True, axis='x', alpha=0.25)
 
     @staticmethod
@@ -115,7 +59,6 @@ class RealtimeVisualizer:
             return "move"
         if "scroll" in et:
             return "scroll"
-        # fallback: try to map known coarse keys
         for k in EVENT_Y.keys():
             if k in et:
                 return k
@@ -132,7 +75,6 @@ class RealtimeVisualizer:
             d["coarse_type"] = coarse
             return d
         except Exception:
-            # try json fallback
             try:
                 d = json.loads(line)
                 et = d.get("event_type")
@@ -150,7 +92,6 @@ class RealtimeVisualizer:
             d = json.loads(line)
             return d
         except Exception:
-            # try ast as fallback
             try:
                 d = ast.literal_eval(line)
                 return d
@@ -191,10 +132,8 @@ class RealtimeVisualizer:
             etype = self._coarse_from_type(etype_raw)
             is_start = bool(ag.get("is_start", False))
             if is_start:
-                # push start
                 self.pending_starts[etype].append({"timestamp": ts, "raw": ag})
             else:
-                # find a matching start (FIFO)
                 if self.pending_starts.get(etype):
                     start = self.pending_starts[etype].pop(0)
                     burst = {
@@ -209,7 +148,6 @@ class RealtimeVisualizer:
                     }
                     self.bursts.append(burst)
                 else:
-                    # unmatched end -> create short burst
                     burst = {
                         "event_type": etype,
                         "start_ts": ts,
@@ -223,7 +161,6 @@ class RealtimeVisualizer:
                     self.bursts.append(burst)
 
     def _read_and_update(self):
-        # read appended lines from files
         ev_lines = self.events_reader.read_new_lines()
         ag_lines = self.aggr_reader.read_new_lines()
         if ev_lines:
@@ -232,11 +169,8 @@ class RealtimeVisualizer:
             self._process_new_aggrs(ag_lines)
 
     def _draw(self, frame):
-        # called by FuncAnimation
-        # first, read files for new data
         self._read_and_update()
 
-        # determine current time (prefer wall clock but ensure it's at least as new as seen data)
         now_wall = time.time()
         now_ts = now_wall
         if self.events:
@@ -245,48 +179,39 @@ class RealtimeVisualizer:
             now_ts = max(now_ts, max(b["end_ts"] for b in self.bursts))
 
         if self.start_time is None:
-            # nothing seen yet; avoid division by zero later
             self.start_time = now_ts
 
         window_start_rel = (now_ts - self.start_time) - self.window_s
         window_end_rel = (now_ts - self.start_time)
 
-        # --- clear & base formatting ---
         self.ax.cla()
         self.ax.set_yticks(list(EVENT_Y.values()))
         self.ax.set_yticklabels(list(EVENT_Y.keys()))
         self.ax.set_ylim(-0.5, max(EVENT_Y.values()) + 0.5)
         self.ax.set_ylabel("Event Type")
         self.ax.grid(True, axis='x', alpha=0.25)
-        self.ax.set_xlim(window_start_rel, window_end_rel + 0.0001)  # avoid zero width
+        self.ax.set_xlim(window_start_rel, window_end_rel + 0.0001)
         self.ax.set_xlabel("Time (s) relative")
 
-        # --- Draw aggregation boxes (behind points) ---
         bursts_shown = [b for b in list(self.bursts) if b["end_rel"] >= window_start_rel and b["start_rel"] <= window_end_rel]
-        # sort by start time to keep deterministic display order
         bursts_shown.sort(key=lambda x: x["start_rel"])
 
         if bursts_shown:
             starts = np.array([max(b["start_rel"], window_start_rel) for b in bursts_shown])
             ends = np.array([min(b["end_rel"], window_end_rel) for b in bursts_shown])
             durations = ends - starts
-            # draw each as a translucent horizontal bar centered at the corresponding event Y
             for i, (s, d, b) in enumerate(zip(starts, durations, bursts_shown)):
                 coarse = b["event_type"]
                 y = EVENT_Y.get(coarse, -1)
                 if y < -0.4:
-                    # unknown type: draw slightly below axis
                     y = -0.75
                 col = EVENT_COLOR.get(coarse, "tab:gray")
-                # use barh with small height and transparency; send to background with zorder
                 self.ax.barh([y], [d], left=[s], height=0.6 * 0.8, align='center',
                              color=col, alpha=0.22, edgecolor=col, linewidth=0.4, zorder=1)
-                # small label near end of box
                 label_x = s + d + 0.01
                 if label_x < window_end_rel:
                     self.ax.text(label_x, y, coarse, va='center', fontsize=7, alpha=0.7, zorder=2)
 
-        # --- Draw events (points) on top ---
         xs = []
         ys = []
         cs = []
@@ -300,45 +225,21 @@ class RealtimeVisualizer:
             xs.append(rel)
             ys.append(EVENT_Y.get(coarse, -1))
             cs.append(EVENT_COLOR.get(coarse, "black"))
-            # size and alpha proportional to recency
             age = window_end_rel - rel
             alpha = max(0.12, 1.0 - (age / self.window_s))
             alphas.append(alpha)
             sizes.append(MARKER_SIZE)
 
-        # draw points (per-point alpha via individual scatter calls to respect alpha)
         for xi, yi, ci, si, ai in zip(xs, ys, cs, sizes, alphas):
-            # place points at a slightly higher zorder than the boxes
             self.ax.scatter([xi], [yi], s=si, color=ci, alpha=ai, edgecolors='none', zorder=3)
 
-        # vertical "now" line
         self.ax.axvline(window_end_rel, color='k', linewidth=0.6, alpha=0.6, zorder=4)
 
-        # small annotation for frame info
         info = f"Window: {self.window_s}s | events: {len(self.events)} | bursts stored: {len(self.bursts)}"
         self.fig.canvas.manager.set_window_title("Realtime Input Visualizer")
         self.ax.text(0.995, 0.01, info, ha='right', va='bottom', transform=self.fig.transFigure, fontsize=8, alpha=0.7)
 
     def run(self):
-        # animate
         self.ani = animation.FuncAnimation(self.fig, self._draw, interval=self.interval_ms, blit=False, cache_frame_data=False)
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
         plt.show()
-
-
-def main():
-    if len(sys.argv) == 3:
-        events_path = sys.argv[1]
-        aggr_path = sys.argv[2]
-    else:
-        session_dir = Path(__file__).parent.parent / "logs"
-        last_session = sorted(session_dir.glob("session_*"))[-1]
-        print(f"Defaulting to: {last_session}")
-        events_path = last_session / "events.jsonl"
-        aggr_path = last_session / "aggregations.jsonl"
-    rv = RealtimeVisualizer(events_path, aggr_path, refresh_hz=REFRESH_HZ, window_s=WINDOW_SECONDS)
-    rv.run()
-
-
-if __name__ == "__main__":
-    main()
