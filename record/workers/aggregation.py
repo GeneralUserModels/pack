@@ -2,20 +2,10 @@ import threading
 import json
 from typing import List, Optional
 from collections import deque
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from record.models.event_queue import AggregationRequest
+from record.models.aggregation import AggregationRequest, ProcessedAggregation
 from record.models import ImageQueue
 from record.workers.save import SaveWorker
-
-
-@dataclass
-class ProcessedAggregation:
-    """Represents an aggregation with matched screenshot and events."""
-    request: AggregationRequest
-    screenshot: Optional[any]  # Screenshot object from ImageQueue
-    screenshot_path: Optional[str]  # Path to saved screenshot
-    events: List[dict]  # Events between this and next aggregation
+from record.workers.wandb import WandBLogger
 
 
 class AggregationWorker:
@@ -24,7 +14,7 @@ class AggregationWorker:
     and filling in the events between consecutive aggregation points.
     """
 
-    def __init__(self, event_queue, image_queue: ImageQueue, save_worker: SaveWorker):
+    def __init__(self, event_queue, image_queue: ImageQueue, save_worker: SaveWorker, wandb_logger: WandBLogger = None):
         """
         Initialize the aggregation worker.
 
@@ -36,6 +26,7 @@ class AggregationWorker:
         self.event_queue = event_queue
         self.image_queue = image_queue
         self.save_worker = save_worker
+        self.wandb_logger = wandb_logger
         self._lock = threading.RLock()
 
         # JSONL file for final aggregations
@@ -52,6 +43,8 @@ class AggregationWorker:
             List of ProcessedAggregation objects with matched screenshots and events
         """
         with self._lock:
+            if self.wandb_logger:
+                self.wandb_logger.log_aggregations(requests)
             processed = []
 
             for i, req in enumerate(requests):

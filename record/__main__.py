@@ -6,10 +6,8 @@ from pathlib import Path
 from datetime import datetime
 from pynput import mouse, keyboard
 
-from record.models import ImageQueue
-from record.models.event_queue import EventQueue, AggregationConfig
-from record.workers.save import SaveWorker
-from record.workers.aggregation import AggregationWorker
+from record.models import ImageQueue, AggregationConfig, EventQueue
+from record.workers import SaveWorker, AggregationWorker, WandBLogger
 from record.handlers import InputEventHandler, ScreenshotHandler
 
 
@@ -19,6 +17,8 @@ class ScreenRecorder:
         self, fps: int = 30,
         buffer_seconds: int = 12,
         buffer_all: bool = False,
+        use_wandb: bool = True,
+        wandb_project: str = "screen-recorder"
     ):
         """
         Initialize the screen recorder.
@@ -27,10 +27,13 @@ class ScreenRecorder:
             fps: Frames per second to capture
             buffer_seconds: Number of seconds to keep in buffer
             buffer_all: If True, save all screenshots to disk
+            use_wandb: If True, enable WandB logging
+            wandb_project: WandB project name
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
+        self.use_wandb = use_wandb
 
         self.image_buffer_size = fps * buffer_seconds
         self.event_buffer_size = fps * buffer_seconds * 30
@@ -41,31 +44,46 @@ class ScreenRecorder:
 
         print(f"Session directory: {self.session_dir}")
 
+        # Initialize WandB logger if enabled
+        self.wandb_logger = None
+        if use_wandb:
+            try:
+                session_name = f"session_{timestamp}"
+                self.wandb_logger = WandBLogger(
+                    project_name=wandb_project,
+                    session_name=session_name
+                )
+                print(f"WandB logging enabled: {wandb_project}/{session_name}")
+            except Exception as e:
+                print(f"Warning: Failed to initialize WandB: {e}")
+                self.wandb_logger = None
+
         self.input_event_queue = EventQueue(
             click_config=AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
             move_config=AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
             scroll_config=AggregationConfig(gap_threshold=0.3, total_threshold=1.5),
             key_config=AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
-            poll_interval=1.0
+            poll_interval=1.0,
+            wandb_logger=self.wandb_logger
         )
+
+        print(f"Session directory: {self.session_dir}")
 
         self.image_queue = ImageQueue(max_length=self.image_buffer_size)
         self.ssim_queue = ImageQueue(max_length=self.image_buffer_size)
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
-        # Create aggregation worker with save_worker
         self.aggregation_worker = AggregationWorker(
             event_queue=self.input_event_queue,
             image_queue=self.image_queue,
-            save_worker=self.save_worker
+            save_worker=self.save_worker,
+            wandb_logger=self.wandb_logger
         )
 
         # Set callbacks
         self.input_event_queue.set_callback(self._on_aggregated_events)
         self.input_event_queue.set_aggregation_callback(self._on_aggregation_requests)
-
-        self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
         self.ssim_queue.add_callback(self._on_ssim_computed)
         self.image_queue.add_callback(self._on_new_image)
@@ -84,6 +102,8 @@ class ScreenRecorder:
 
         # Running flag
         self.running = False
+
+        # Statistics
         self.processed_aggregations = 0
 
     def _on_aggregated_events(self, event_type: str, events: list):
@@ -110,8 +130,10 @@ class ScreenRecorder:
 
         print(f"\nProcessing {len(requests)} aggregation requests...")
 
+        # Process aggregations using the aggregation worker
         processed = self.aggregation_worker.process_aggregations(requests)
 
+        # Log results
         for agg in processed:
             screenshot_status = "✓" if agg.screenshot else "✗"
             path_info = f"-> {agg.screenshot_path}" if agg.screenshot_path else ""
@@ -120,9 +142,14 @@ class ScreenRecorder:
 
         self.processed_aggregations += len(processed)
 
+        # Clean up old events to prevent memory growth
         if requests:
             oldest_timestamp = requests[0].timestamp
             self.aggregation_worker.cleanup_old_events(oldest_timestamp)
+
+        # Here you can add your custom logic to save the processed aggregations
+        # For now, they are just logged
+        # Future: self._save_aggregations(processed)
 
     def _on_ssim_computed(self, image):
         """Callback for saving SSIM values."""
@@ -145,6 +172,7 @@ class ScreenRecorder:
         print("Input event aggregation: ENABLED")
         print(f"  - Save all images: {self.buffer_all}")
 
+        # Start input event queue polling
         self.input_event_queue.start()
 
         self.screenshot_manager.start()
@@ -172,6 +200,7 @@ class ScreenRecorder:
         print("\nStopping recorder...")
         self.running = False
 
+        # Stop input event queue (this will process remaining aggregations)
         self.input_event_queue.stop()
 
         self.screenshot_manager.stop()
@@ -181,10 +210,6 @@ class ScreenRecorder:
         if self.keyboard_listener:
             self.keyboard_listener.stop()
 
-        print("\nRecording statistics:")
-        print(f"  Images captured: {len(self.image_queue)}")
-        print(f"  SSIM values computed: {len(self.ssim_queue)}")
-        print(f"  Processed aggregations: {self.processed_aggregations}")
         print(f"\nSession saved to: {self.session_dir}")
         print(f"Aggregations saved to: {self.aggregation_worker.aggregations_file}")
 

@@ -2,23 +2,9 @@ import threading
 import time
 from typing import List, Callable, Optional
 from collections import deque
-from dataclasses import dataclass
 from record.models.event import InputEvent, EventType
-
-
-@dataclass
-class AggregationConfig:
-    gap_threshold: float  # Max time gap between consecutive events (seconds)
-    total_threshold: float  # Max time span from first to last event (seconds)
-
-
-@dataclass
-class AggregationRequest:
-    """Represents a request for a screenshot at a specific time."""
-    timestamp: float
-    reason: str  # e.g., "keyboard_start", "mouse_move_end"
-    event_type: str  # e.g., "key", "move"
-    is_start: bool  # True for start, False for end
+from record.workers.wandb import WandBLogger
+from record.models.aggregation import AggregationConfig, AggregationRequest
 
 
 class EventQueue:
@@ -29,7 +15,8 @@ class EventQueue:
         move_config: Optional[AggregationConfig] = None,
         scroll_config: Optional[AggregationConfig] = None,
         key_config: Optional[AggregationConfig] = None,
-        poll_interval: float = 1.0
+        poll_interval: float = 1.0,
+        wandb_logger: WandBLogger = None
     ):
         """
         Initialize the input event queue.
@@ -41,6 +28,7 @@ class EventQueue:
             key_config: Configuration for key event aggregation
             poll_interval: Interval in seconds for polling worker
         """
+        self.wandb_logger = wandb_logger
         self.configs = {
             'click': click_config or AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
             'move': move_config or AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
@@ -56,19 +44,11 @@ class EventQueue:
             'key': deque(),
         }
 
-        # Queue to store ALL input events
         self.all_events = deque()
-
-        # Queue to store aggregation requests (screenshot requests)
         self.aggregation_requests = deque()
-
-        # List of ready aggregation requests to be processed by callback
         self.final_aggregations = []
-
-        # Time threshold - we can safely aggregate events older than this
         self.safe_aggregation_time = 0.0
 
-        # Event type mapping
         self.event_type_mapping = {
             EventType.MOUSE_DOWN: 'click',
             EventType.MOUSE_UP: 'click',
@@ -121,10 +101,12 @@ class EventQueue:
             # Add to all_events queue
             self.all_events.append(event)
 
-            # Get the aggregation type
             agg_type = self.event_type_mapping.get(event.event_type)
             if agg_type is None:
                 return
+
+            if self.wandb_logger:
+                self.wandb_logger.log_event(event, agg_type)
 
             queue = self.aggregations[agg_type]
             config = self.configs[agg_type]
@@ -181,7 +163,6 @@ class EventQueue:
         if not events:
             return
 
-        # Create start and end aggregation requests
         start_request = AggregationRequest(
             timestamp=events[0].timestamp,
             reason=f"{agg_type}_start",
@@ -199,7 +180,6 @@ class EventQueue:
         self.aggregation_requests.append(start_request)
         self.aggregation_requests.append(end_request)
 
-        # Call the original callback if set
         if self._callback:
             try:
                 self._callback(agg_type, events)
@@ -226,7 +206,7 @@ class EventQueue:
                         self._process_aggregation(agg_type, list(queue))
                         queue.clear()
 
-                max_threshold = max(cfg.gap_threshold for cfg in self.configs.values()) + 1
+                max_threshold = max(cfg.gap_threshold for cfg in self.configs.values())
                 self.safe_aggregation_time = current_time - max_threshold
 
                 self._prepare_final_aggregations()
@@ -239,7 +219,6 @@ class EventQueue:
         if not self.aggregation_requests:
             return
 
-        # Find all requests that are safe to process
         ready_requests = []
         remaining_requests = deque()
 
@@ -254,10 +233,8 @@ class EventQueue:
         if not ready_requests:
             return
 
-        # Sort requests by timestamp
         ready_requests.sort(key=lambda r: r.timestamp)
 
-        # Add to final_aggregations and trigger callback
         self.final_aggregations.extend(ready_requests)
 
         if self._aggregation_callback:
@@ -281,16 +258,13 @@ class EventQueue:
         with self._lock:
             self._running = False
 
-            # Process all remaining aggregations
             for agg_type, queue in self.aggregations.items():
                 if queue:
                     self._process_aggregation(agg_type, list(queue))
                     queue.clear()
 
-            # Update safe time to current time and process all remaining requests
             self.safe_aggregation_time = time.time()
             self._prepare_final_aggregations()
 
-        # Wait for poll thread to finish
         if self._poll_thread and self._poll_thread.is_alive():
             self._poll_thread.join(timeout=2.0)
