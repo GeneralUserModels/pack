@@ -37,15 +37,15 @@ class ScreenRecorder:
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v6_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v7_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")
 
         self.input_event_queue = EventQueue(
-            click_config=AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
-            move_config=AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
-            scroll_config=AggregationConfig(gap_threshold=0.3, total_threshold=1.5),
+            click_config=AggregationConfig(gap_threshold=0.1, total_threshold=0.2),
+            move_config=AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
+            scroll_config=AggregationConfig(gap_threshold=0.5, total_threshold=1.5),
             key_config=AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
             poll_interval=1.0,
             session_dir=self.session_dir
@@ -99,7 +99,7 @@ class ScreenRecorder:
 
         for agg in processed:
             screenshot_status = "✓" if agg.screenshot else "✗"
-            path_info = f"-> {agg.screenshot_path}" if agg.screenshot_path else ""
+            path_info = f"-> {agg.screenshot_path.split('/')[-1]}" if agg.screenshot_path else ""
             print(f"  {screenshot_status} {agg.request.reason:20s}"
                   f"| {len(agg.events)} events {path_info}")
 
@@ -161,14 +161,19 @@ class ScreenRecorder:
         if not self.running:
             return
 
-        print("\nStopping recorder...")
+        print("\n" + "=" * 41)
+        print(">>>>        Stopping Recorder        <<<<")
+        print("=" * 41 + "\n")
+
+        print(">>>> Cleaning up remaining processes ...\n")
+
         self.running = False
 
         self.input_event_queue.stop()
 
         self.screenshot_manager.stop()
         if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=1.0)
+            self.monitor_thread.join(timeout=0.1)
 
         if self.mouse_listener:
             self.mouse_listener.stop()

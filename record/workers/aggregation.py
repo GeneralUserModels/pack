@@ -27,7 +27,6 @@ class AggregationWorker:
         self.save_worker = save_worker
         self._lock = threading.RLock()
 
-        # JSONL file for final aggregations
         self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
 
     def process_aggregations(self, requests: List[AggregationRequest]) -> List[ProcessedAggregation]:
@@ -44,15 +43,12 @@ class AggregationWorker:
             processed = []
 
             for i, req in enumerate(requests):
-                # Find the closest screenshot
                 screenshot = self._find_screenshot(req.timestamp, req.is_start)
 
-                # Save the screenshot if found
                 screenshot_path = None
                 if screenshot is not None:
                     screenshot_path = self.save_worker.save_screenshot(screenshot, force_save=True)
 
-                # Find events between this request and the next
                 next_timestamp = (
                     requests[i + 1].timestamp
                     if i + 1 < len(requests)
@@ -61,7 +57,6 @@ class AggregationWorker:
 
                 events = self._get_events_between(req.timestamp, next_timestamp)
 
-                # Create processed aggregation
                 processed_agg = ProcessedAggregation(
                     request=req,
                     screenshot=screenshot,
@@ -71,7 +66,6 @@ class AggregationWorker:
 
                 processed.append(processed_agg)
 
-                # Save to JSONL
                 self._save_aggregation_to_jsonl(processed_agg)
 
             return processed
@@ -88,24 +82,18 @@ class AggregationWorker:
             Screenshot object or None if not found
         """
         if is_start:
-            # For start events, get screenshot from before the timestamp
-            candidates = self.image_queue.get_entries_before(timestamp, milliseconds=50)
+            candidates = self.image_queue.get_entries_before(timestamp, milliseconds=75)
 
             if not candidates:
-                # Fallback: try to get closest screenshot in wider window
                 candidates = self.image_queue.get_entries_before(timestamp, milliseconds=200)
 
-            # Get the latest screenshot before the timestamp
             return candidates[-1] if candidates else None
         else:
-            # For end events, get screenshot from after the timestamp
-            candidates = self.image_queue.get_entries_after(timestamp, milliseconds=50)
+            candidates = self.image_queue.get_entries_after(timestamp, milliseconds=75)
 
             if not candidates:
-                # Fallback: try to get closest screenshot in wider window
                 candidates = self.image_queue.get_entries_after(timestamp, milliseconds=200)
 
-            # Get the earliest screenshot after the timestamp
             return candidates[0] if candidates else None
 
     def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> List[dict]:
@@ -158,7 +146,6 @@ class AggregationWorker:
             aggregation: ProcessedAggregation object to save
         """
         try:
-            # Prepare data for JSONL
             data = {
                 'timestamp': aggregation.request.timestamp,
                 'reason': aggregation.request.reason,
@@ -170,7 +157,6 @@ class AggregationWorker:
                 'events': aggregation.events
             }
 
-            # Append to JSONL file
             with open(self.aggregations_file, 'a') as f:
                 json.dump(data, f)
                 f.write('\n')

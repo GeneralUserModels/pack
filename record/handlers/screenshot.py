@@ -36,7 +36,7 @@ class ScreenshotHandler:
 
     def _capture_loop(self) -> None:
         """Main loop for capturing screenshots."""
-        with mss.mss() as sct:
+        with mss.mss(with_cursor=True) as sct:
             while self._running:
                 start_time = time.time()
 
