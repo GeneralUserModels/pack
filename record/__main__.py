@@ -7,7 +7,7 @@ from datetime import datetime
 from pynput import mouse, keyboard
 
 from record.models import ImageQueue, AggregationConfig, EventQueue
-from record.workers import SaveWorker, AggregationWorker, WandBLogger
+from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 
 
@@ -16,9 +16,7 @@ class ScreenRecorder:
     def __init__(
         self, fps: int = 30,
         buffer_seconds: int = 12,
-        buffer_all: bool = False,
-        use_wandb: bool = True,
-        wandb_project: str = "screen-recorder"
+        buffer_all: bool = False
     ):
         """
         Initialize the screen recorder.
@@ -27,36 +25,19 @@ class ScreenRecorder:
             fps: Frames per second to capture
             buffer_seconds: Number of seconds to keep in buffer
             buffer_all: If True, save all screenshots to disk
-            use_wandb: If True, enable WandB logging
-            wandb_project: WandB project name
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
-        self.use_wandb = use_wandb
 
         self.image_buffer_size = fps * buffer_seconds
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v5_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v6_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")
-
-        # Initialize WandB logger if enabled
-        self.wandb_logger = None
-        if use_wandb:
-            try:
-                session_name = f"session_{timestamp}"
-                self.wandb_logger = WandBLogger(
-                    project_name=wandb_project,
-                    session_name=session_name
-                )
-                print(f"WandB logging enabled: {wandb_project}/{session_name}")
-            except Exception as e:
-                print(f"Warning: Failed to initialize WandB: {e}")
-                self.wandb_logger = None
 
         self.input_event_queue = EventQueue(
             click_config=AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
@@ -64,7 +45,7 @@ class ScreenRecorder:
             scroll_config=AggregationConfig(gap_threshold=0.3, total_threshold=1.5),
             key_config=AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
             poll_interval=1.0,
-            wandb_logger=self.wandb_logger
+            session_dir=self.session_dir
         )
 
         print(f"Session directory: {self.session_dir}")
@@ -78,7 +59,6 @@ class ScreenRecorder:
             event_queue=self.input_event_queue,
             image_queue=self.image_queue,
             save_worker=self.save_worker,
-            wandb_logger=self.wandb_logger
         )
 
         # Set callbacks

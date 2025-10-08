@@ -1,9 +1,9 @@
 import threading
 import time
+from pathlib import Path
 from typing import List, Callable, Optional
 from collections import deque
 from record.models.event import InputEvent, EventType
-from record.workers.wandb import WandBLogger
 from record.models.aggregation import AggregationConfig, AggregationRequest
 
 
@@ -16,7 +16,7 @@ class EventQueue:
         scroll_config: Optional[AggregationConfig] = None,
         key_config: Optional[AggregationConfig] = None,
         poll_interval: float = 1.0,
-        wandb_logger: WandBLogger = None
+        session_dir: Path = None
     ):
         """
         Initialize the input event queue.
@@ -28,7 +28,7 @@ class EventQueue:
             key_config: Configuration for key event aggregation
             poll_interval: Interval in seconds for polling worker
         """
-        self.wandb_logger = wandb_logger
+        self.session_dir = session_dir
         self.configs = {
             'click': click_config or AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
             'move': move_config or AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
@@ -105,9 +105,6 @@ class EventQueue:
             if agg_type is None:
                 return
 
-            if self.wandb_logger:
-                self.wandb_logger.log_event(event, agg_type)
-
             queue = self.aggregations[agg_type]
             config = self.configs[agg_type]
 
@@ -151,6 +148,10 @@ class EventQueue:
                 queue.clear()
                 queue.extend(second_half)
                 queue.append(event)
+
+        if self.session_dir:
+            with open(self.session_dir / "events.jsonl", "a") as f:
+                f.write(str(event.to_dict()) + "\n")
 
     def _process_aggregation(self, agg_type: str, events: List[InputEvent]) -> None:
         """

@@ -5,7 +5,6 @@ from collections import deque
 from record.models.aggregation import AggregationRequest, ProcessedAggregation
 from record.models import ImageQueue
 from record.workers.save import SaveWorker
-from record.workers.wandb import WandBLogger
 
 
 class AggregationWorker:
@@ -14,7 +13,7 @@ class AggregationWorker:
     and filling in the events between consecutive aggregation points.
     """
 
-    def __init__(self, event_queue, image_queue: ImageQueue, save_worker: SaveWorker, wandb_logger: WandBLogger = None):
+    def __init__(self, event_queue, image_queue: ImageQueue, save_worker: SaveWorker):
         """
         Initialize the aggregation worker.
 
@@ -26,7 +25,6 @@ class AggregationWorker:
         self.event_queue = event_queue
         self.image_queue = image_queue
         self.save_worker = save_worker
-        self.wandb_logger = wandb_logger
         self._lock = threading.RLock()
 
         # JSONL file for final aggregations
@@ -43,8 +41,6 @@ class AggregationWorker:
             List of ProcessedAggregation objects with matched screenshots and events
         """
         with self._lock:
-            if self.wandb_logger:
-                self.wandb_logger.log_aggregations(requests)
             processed = []
 
             for i, req in enumerate(requests):
