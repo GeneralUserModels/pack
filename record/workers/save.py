@@ -43,7 +43,7 @@ class SaveWorker:
         except Exception as e:
             print(f"Error saving input event: {e}")
 
-    def save_image(self, image: BufferImage, buffer_dir: bool = False, force_save: bool = False) -> str:
+    def save_image(self, image: BufferImage, buffer_dir: bool = False, force_save: bool = False, save_reason: str = "") -> str:
         """
         Save an image to disk and log the metadata.
 
@@ -57,7 +57,7 @@ class SaveWorker:
         """
         try:
             save_dir = self.buffer_imgs_dir if buffer_dir else self.screenshots_dir
-            filename = f"{image.timestamp:.6f}_monitor_{image.monitor_index}.jpg"
+            filename = f"{image.timestamp:.6f}_reason_{save_reason}.jpg"
             filepath = save_dir / filename
 
             # Always attempt to write the image if force_save True or buffer_all True
@@ -89,6 +89,6 @@ class SaveWorker:
         """Save image to buffer_imgs directory."""
         return self.save_image(image, buffer_dir=True)
 
-    def save_screenshot(self, image: BufferImage, force_save: bool = False) -> str:
+    def save_screenshot(self, image: BufferImage, force_save: bool = False, save_reason: str = "") -> str:
         """Save image to screenshots directory."""
-        return self.save_image(image, buffer_dir=False, force_save=force_save)
+        return self.save_image(image, buffer_dir=False, force_save=force_save, save_reason=save_reason)

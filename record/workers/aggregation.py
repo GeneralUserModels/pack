@@ -47,7 +47,7 @@ class AggregationWorker:
 
                 screenshot_path = None
                 if screenshot is not None:
-                    screenshot_path = self.save_worker.save_screenshot(screenshot, force_save=True)
+                    screenshot_path = self.save_worker.save_screenshot(screenshot, force_save=True, save_reason=req.reason)
 
                 next_timestamp = (
                     requests[i + 1].timestamp

@@ -15,6 +15,7 @@ MAX_BURSTS = 500
 EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}
 EVENT_COLOR = {'key': 'tab:purple', 'click': 'tab:red', 'move': 'tab:green', 'scroll': 'tab:orange'}
 MARKER_SIZE = 24
+EVENT_THROTTLE_MS = 75
 
 
 class RealtimeVisualizer:
@@ -29,8 +30,11 @@ class RealtimeVisualizer:
 
         self.start_time: Optional[float] = None
 
+        self.last_shown_time: Dict[str, float] = defaultdict(lambda: -float('inf'))
+
         self.window_s = window_s
         self.interval_ms = int(1000.0 / refresh_hz)
+        self.throttle_s = EVENT_THROTTLE_MS / 1000.0
 
         plt.rcParams["toolbar"] = "toolbar2"
         self.fig, self.ax = plt.subplots(figsize=(12, 5))
@@ -51,14 +55,14 @@ class RealtimeVisualizer:
             return "unknown"
         if "key" in et:
             return "key"
-        if "mouse" in et or et == "click":
+        if "mouse" in et:
             if "move" in et:
                 return "move"
-            if "click" in et or "button" in et:
+            if "mouse_up" in et or "mouse_down" in et:
                 return "click"
+            if "scroll" in et:
+                return "scroll"
             return "move"
-        if "scroll" in et:
-            return "scroll"
         for k in EVENT_Y.keys():
             if k in et:
                 return k
@@ -107,13 +111,18 @@ class RealtimeVisualizer:
             if self.start_time is None:
                 self.start_time = ts
             rel = ts - self.start_time
-            item = {
-                "timestamp": ts,
-                "relative": rel,
-                "coarse": ev.get("coarse_type", "unknown"),
-                "raw": ev
-            }
-            self.events.append(item)
+            coarse = ev.get("coarse_type", "unknown")
+
+            # Throttle: only show one event per type every EVENT_THROTTLE_MS
+            if ts - self.last_shown_time[coarse] >= self.throttle_s:
+                self.last_shown_time[coarse] = ts
+                item = {
+                    "timestamp": ts,
+                    "relative": rel,
+                    "coarse": coarse,
+                    "raw": ev
+                }
+                self.events.append(item)
 
     def _process_new_aggrs(self, lines: List[str]):
         """
