@@ -216,7 +216,7 @@ class RealtimeVisualizer:
                     y = -0.75
                 col = EVENT_COLOR.get(coarse, "tab:gray")
                 self.ax.barh([y], [d], left=[s], height=0.6 * 0.8, align='center',
-                             color=col, alpha=0.22, edgecolor=col, linewidth=0.4, zorder=1)
+                             color=col, alpha=0.22, edgecolor="black", linewidth=0.4, zorder=1)
                 label_x = s + d + 0.01
                 if label_x < window_end_rel:
                     self.ax.text(label_x, y, coarse, va='center', fontsize=7, alpha=0.7, zorder=2)

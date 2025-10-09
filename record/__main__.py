@@ -11,6 +11,7 @@ from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer
+from record.constants import Constants
 
 
 class ScreenRecorder:
@@ -43,10 +44,10 @@ class ScreenRecorder:
         print(f"Session directory: {self.session_dir}")
 
         self.input_event_queue = EventQueue(
-            click_config=AggregationConfig(gap_threshold=0.1, total_threshold=0.2),
-            move_config=AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
-            scroll_config=AggregationConfig(gap_threshold=0.5, total_threshold=1.5),
-            key_config=AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
+            click_config=AggregationConfig(gap_threshold=Constants.CLICK_GAP_THRESHOLD, total_threshold=Constants.CLICK_TOTAL_THRESHOLD),
+            move_config=AggregationConfig(gap_threshold=Constants.MOVE_GAP_THRESHOLD, total_threshold=Constants.MOVE_TOTAL_THRESHOLD),
+            scroll_config=AggregationConfig(gap_threshold=Constants.SCROLL_GAP_THRESHOLD, total_threshold=Constants.SCROLL_TOTAL_THRESHOLD),
+            key_config=AggregationConfig(gap_threshold=Constants.KEY_GAP_THRESHOLD, total_threshold=Constants.KEY_TOTAL_THRESHOLD),
             poll_interval=1.0,
             session_dir=self.session_dir
         )

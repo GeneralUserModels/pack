@@ -5,6 +5,7 @@ from collections import deque
 from record.models.aggregation import AggregationRequest, ProcessedAggregation
 from record.models import ImageQueue
 from record.workers.save import SaveWorker
+from record.constants import Constants
 
 
 class AggregationWorker:
@@ -82,18 +83,10 @@ class AggregationWorker:
             Screenshot object or None if not found
         """
         if is_start:
-            candidates = self.image_queue.get_entries_before(timestamp, milliseconds=75)
-
-            if not candidates:
-                candidates = self.image_queue.get_entries_before(timestamp, milliseconds=200)
-
+            candidates = self.image_queue.get_entries_before(timestamp, milliseconds=Constants.PADDING_BEFORE)
             return candidates[-1] if candidates else None
         else:
-            candidates = self.image_queue.get_entries_after(timestamp, milliseconds=75)
-
-            if not candidates:
-                candidates = self.image_queue.get_entries_after(timestamp, milliseconds=200)
-
+            candidates = self.image_queue.get_entries_after(timestamp, milliseconds=Constants.PADDING_AFTER)
             return candidates[0] if candidates else None
 
     def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> List[dict]:
