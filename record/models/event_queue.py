@@ -30,10 +30,10 @@ class EventQueue:
         """
         self.session_dir = session_dir
         self.configs = {
-            'click': click_config or AggregationConfig(gap_threshold=0.5, total_threshold=2.0),
-            'move': move_config or AggregationConfig(gap_threshold=0.1, total_threshold=1.0),
-            'scroll': scroll_config or AggregationConfig(gap_threshold=0.3, total_threshold=1.5),
-            'key': key_config or AggregationConfig(gap_threshold=0.5, total_threshold=3.0),
+            'click': click_config,
+            'move': move_config,
+            'scroll': scroll_config,
+            'key': key_config,
         }
 
         # Aggregation queues for each event type
@@ -60,7 +60,6 @@ class EventQueue:
 
         self._lock = threading.RLock()
         self._callback: Optional[Callable[[str, List[InputEvent]], None]] = None
-        self._aggregation_callback: Optional[Callable[[List[AggregationRequest]], None]] = None
 
         # Polling worker
         self.poll_interval = poll_interval
@@ -76,19 +75,6 @@ class EventQueue:
         """
         with self._lock:
             self._callback = callback
-
-    def set_aggregation_callback(
-        self,
-        callback: Callable[[List[AggregationRequest]], None]
-    ) -> None:
-        """
-        Set the callback function for ready aggregation requests.
-
-        Args:
-            callback: Function that takes a list of AggregationRequest objects
-        """
-        with self._lock:
-            self._aggregation_callback = callback
 
     def enqueue(self, event: InputEvent) -> None:
         """
@@ -238,9 +224,9 @@ class EventQueue:
 
         self.final_aggregations.extend(ready_requests)
 
-        if self._aggregation_callback:
+        if self._callback:
             try:
-                self._aggregation_callback(list(ready_requests))
+                self._callback(list(ready_requests))
             except Exception as e:
                 print(f"Error in aggregation callback: {e}")
 

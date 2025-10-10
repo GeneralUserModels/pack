@@ -40,7 +40,8 @@ Aggregations are triggered by the category-specific buffers, whereas the shared 
 
 Triggering an aggregation involves the following steps:
 
-1. The first and last event in the burst are used to locate the closest screenshots in the buffer. A padding of `±75 ms` ensures that the screenshots capture the state both before and after the event (`-75 ms` for before, `+75 ms` for after).
-2. All events occurring between the burst’s first and last event are retrieved from the shared buffer and saved together with the screenshots in a JSONL file.
+1. A new aggregation request is added to a queue and a worker polls this queue and checks for each request, if the maximal total thresholds are over for this request.
+2. The first and last event in the burst are used to locate the closest screenshots in the buffer. A padding of `±75 ms` ensures that the screenshots capture the state both before and after the event (`-75 ms` for before, `+75 ms` for after).
+3. All events occurring between the burst’s first and last event are retrieved from the shared buffer and saved together with the screenshots in a JSONL file.
 
 All saving operations are performed asynchronously to ensure that the main recording loop remains non-blocking and responsive.

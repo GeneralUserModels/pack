@@ -91,7 +91,7 @@ class AggregationWorker:
 
     def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> List[dict]:
         """
-        Get all events between two timestamps from the all_events queue.
+        Get all events between two timestamps from the all_events queue and remove them.
 
         Args:
             start_timestamp: Start time (inclusive)
@@ -100,13 +100,22 @@ class AggregationWorker:
         Returns:
             List of serialized events
         """
-        events = [
-            self._serialize_event(e)
-            for e in self.event_queue.all_events
-            if start_timestamp <= e.timestamp < end_timestamp
-        ]
+        events_to_keep = []
+        events_to_process = []
 
-        return events
+        for e in self.event_queue.all_events:
+            if start_timestamp <= e.timestamp < end_timestamp:
+                events_to_process.append(e)
+            else:
+                events_to_keep.append(e)
+
+        # Update the queue to only contain events outside the range
+        self.event_queue.all_events = deque(events_to_keep)
+
+        # Serialize the processed events
+        serialized = [self._serialize_event(e) for e in events_to_process]
+
+        return serialized
 
     def _serialize_event(self, event) -> dict:
         """Serialize an InputEvent to a dictionary."""

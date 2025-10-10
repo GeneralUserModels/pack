@@ -12,3 +12,11 @@ class Constants(float, Enum):
     KEY_TOTAL_THRESHOLD = 3.0
     PADDING_BEFORE = 75
     PADDING_AFTER = 75
+
+
+MAX_TOTAL_THRESHOLD = max(
+    Constants.CLICK_TOTAL_THRESHOLD,
+    Constants.MOVE_TOTAL_THRESHOLD,
+    Constants.SCROLL_TOTAL_THRESHOLD,
+    Constants.KEY_TOTAL_THRESHOLD
+)

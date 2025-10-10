@@ -5,13 +5,14 @@ import sys
 import threading
 from pathlib import Path
 from datetime import datetime
+from collections import deque
 from pynput import mouse, keyboard
 
 from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer
-from record.constants import Constants
+from record.constants import Constants, MAX_TOTAL_THRESHOLD
 
 
 class ScreenRecorder:
@@ -54,6 +55,7 @@ class ScreenRecorder:
 
         print(f"Session directory: {self.session_dir}")
 
+        self.aggregation_requests = deque()
         self.image_queue = ImageQueue(max_length=self.image_buffer_size)
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
@@ -64,8 +66,7 @@ class ScreenRecorder:
             save_worker=self.save_worker,
         )
 
-        self.input_event_queue.set_callback(self._on_aggregated_events)
-        self.input_event_queue.set_aggregation_callback(self._on_aggregation_requests)
+        self.input_event_queue.set_callback(self._on_aggregation_requests)
 
         self.image_queue.add_callback(self._on_new_image)
 
@@ -82,18 +83,52 @@ class ScreenRecorder:
         self.running = False
         self.processed_aggregations = 0
 
+        self.aggregation_thread = None
+        self.aggregation_lock = threading.Lock()
+
         self.monitor_thread = None
         if monitor:
             self._setup_monitor()
 
-    def _on_aggregated_events(self, event_type: str, events: list):
-        print(f"Aggregated {event_type} burst: {len(events)} events "
-              f"({events[0].timestamp:.3f} -> {events[-1].timestamp:.3f})")
-
     def _on_aggregation_requests(self, requests: list):
+        """Callback that appends requests to the queue instead of processing immediately."""
         if not requests:
             return
 
+        with self.aggregation_lock:
+            self.aggregation_requests.extend(requests)
+
+    def _process_aggregation_queue(self):
+        """Background thread that polls and processes aggregation requests."""
+        poll_interval = 0.1  # Poll every 100ms
+
+        while self.running:
+            try:
+                current_time = time.time()
+                threshold_time = current_time - (MAX_TOTAL_THRESHOLD + 1)
+
+                requests_to_process = []
+
+                with self.aggregation_lock:
+                    while self.aggregation_requests:
+                        req = self.aggregation_requests[0]
+                        # Check if request is older than threshold
+                        if req.timestamp <= threshold_time:
+                            requests_to_process.append(self.aggregation_requests.popleft())
+                        else:
+                            break
+
+                if requests_to_process:
+                    self._process_requests(requests_to_process)
+
+                time.sleep(poll_interval)
+
+            except Exception as e:
+                print(f"Error in aggregation processing thread: {e}")
+                time.sleep(poll_interval)
+
+    def _process_requests(self, requests: list):
+        """Process a batch of aggregation requests."""
         print(f"\nProcessing {len(requests)} aggregation requests...")
 
         processed = self.aggregation_worker.process_aggregations(requests)
@@ -134,13 +169,20 @@ class ScreenRecorder:
         self.running = True
         print(f"Starting screen recorder at {self.fps} FPS")
         print(f"Buffer: {self.buffer_seconds} seconds ({self.image_buffer_size} frames)")
-        print("Input event aggregation: ENABLED")
+        print("Input event aggregation: ENABLED (async processing)")
         print(f"  - Save all images: {self.buffer_all}")
 
         # Start input event queue polling
         self.input_event_queue.start()
 
         self.screenshot_manager.start()
+
+        # Start aggregation processing thread
+        self.aggregation_thread = threading.Thread(
+            target=self._process_aggregation_queue,
+            daemon=True
+        )
+        self.aggregation_thread.start()
 
         self.mouse_listener = mouse.Listener(
             on_move=self.input_handler.on_move,
@@ -173,6 +215,11 @@ class ScreenRecorder:
         self.input_event_queue.stop()
 
         self.screenshot_manager.stop()
+
+        # Wait for aggregation thread to finish
+        if self.aggregation_thread and self.aggregation_thread.is_alive():
+            self.aggregation_thread.join(timeout=2.0)
+
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=0.1)
 
@@ -180,6 +227,13 @@ class ScreenRecorder:
             self.mouse_listener.stop()
         if self.keyboard_listener:
             self.keyboard_listener.stop()
+
+        # Process any remaining requests
+        with self.aggregation_lock:
+            remaining = list(self.aggregation_requests)
+        if remaining:
+            print(f"Processing {len(remaining)} remaining aggregation requests...")
+            self._process_requests(remaining)
 
         print(f"\nSession saved to: {self.session_dir}")
         print(f"Aggregations saved to: {self.aggregation_worker.aggregations_file}")
