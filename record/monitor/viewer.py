@@ -114,7 +114,7 @@ class RealtimeVisualizer:
             coarse = ev.get("coarse_type", "unknown")
 
             # Throttle: only show one event per type every EVENT_THROTTLE_MS
-            if ts - self.last_shown_time[coarse] >= self.throttle_s:
+            if ts - self.last_shown_time[coarse] >= self.throttle_s or ev.get("event_type") != "mouse_move":
                 self.last_shown_time[coarse] = ts
                 item = {
                     "timestamp": ts,

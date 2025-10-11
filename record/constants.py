@@ -12,6 +12,7 @@ class Constants(float, Enum):
     KEY_TOTAL_THRESHOLD = 3.0
     PADDING_BEFORE = 75
     PADDING_AFTER = 75
+    FINAL_PADDING = 100
 
 
 MAX_TOTAL_THRESHOLD = max(

@@ -1,6 +1,6 @@
 import threading
 import json
-from typing import List, Optional
+from typing import Optional
 from collections import deque
 from record.models.aggregation import AggregationRequest, ProcessedAggregation
 from record.models import ImageQueue
@@ -11,7 +11,8 @@ from record.constants import Constants
 class AggregationWorker:
     """
     Worker that processes aggregation requests by matching them with screenshots
-    and filling in the events between consecutive aggregation points.
+    and collecting all events within the burst window (including other event types).
+    Events are always mapped to the latest (most recent) burst they fall within.
     """
 
     def __init__(self, event_queue, image_queue: ImageQueue, save_worker: SaveWorker):
@@ -30,46 +31,60 @@ class AggregationWorker:
 
         self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
 
-    def process_aggregations(self, requests: List[AggregationRequest]) -> List[ProcessedAggregation]:
+        # Track processed bursts to avoid double-processing
+        self.processed_requests = set()
+
+    def process_aggregation(self, request: AggregationRequest) -> ProcessedAggregation:
         """
-        Process a batch of aggregation requests.
+        Process a single aggregation request (start or end of a burst).
 
         Args:
-            requests: List of AggregationRequest objects (already sorted by timestamp)
+            request: AggregationRequest object with timestamp and is_start flag
 
         Returns:
-            List of ProcessedAggregation objects with matched screenshots and events
+            ProcessedAggregation object with matched screenshot and events
         """
         with self._lock:
-            processed = []
-
-            for i, req in enumerate(requests):
-                screenshot = self._find_screenshot(req.timestamp, req.is_start)
-
-                screenshot_path = None
-                if screenshot is not None:
-                    screenshot_path = self.save_worker.save_screenshot(screenshot, force_save=True, save_reason=req.reason)
-
-                next_timestamp = (
-                    requests[i + 1].timestamp
-                    if i + 1 < len(requests)
-                    else self.event_queue.safe_aggregation_time
+            # Skip if already processed
+            request_key = (request.timestamp, request.reason)
+            if request_key in self.processed_requests:
+                return ProcessedAggregation(
+                    request=request,
+                    screenshot=None,
+                    screenshot_path=None,
+                    events=[]
                 )
 
-                events = self._get_events_between(req.timestamp, next_timestamp)
+            self.processed_requests.add(request_key)
 
-                processed_agg = ProcessedAggregation(
-                    request=req,
-                    screenshot=screenshot,
-                    screenshot_path=screenshot_path,
-                    events=events
+            # For start requests: screenshot ~50ms BEFORE
+            # For end requests: screenshot ~50ms AFTER
+            screenshot = self._find_screenshot(request.timestamp, request.is_start)
+
+            screenshot_path = None
+            if screenshot is not None:
+                screenshot_path = self.save_worker.save_screenshot(
+                    screenshot, force_save=True, save_reason=request.reason
                 )
 
-                processed.append(processed_agg)
+            # Get all events that fall within this burst
+            # Start request: from this timestamp to end_timestamp (next burst)
+            # End request: uses end_timestamp from when it was created
+            if request.end_timestamp is None:
+                request.end_timestamp = float('inf')
 
-                self._save_aggregation_to_jsonl(processed_agg)
+            events = self._get_events_between(request.timestamp, request.end_timestamp)
 
-            return processed
+            processed_agg = ProcessedAggregation(
+                request=request,
+                screenshot=screenshot,
+                screenshot_path=screenshot_path,
+                events=events
+            )
+
+            self._save_aggregation_to_jsonl(processed_agg)
+
+            return processed_agg
 
     def _find_screenshot(self, timestamp: float, is_start: bool) -> Optional[any]:
         """
@@ -83,34 +98,43 @@ class AggregationWorker:
             Screenshot object or None if not found
         """
         if is_start:
-            candidates = self.image_queue.get_entries_before(timestamp, milliseconds=Constants.PADDING_BEFORE)
+            # For start events, get screenshot before (before the burst begins)
+            candidates = self.image_queue.get_entries_before(
+                timestamp, milliseconds=Constants.PADDING_BEFORE
+            )
             return candidates[-1] if candidates else None
         else:
-            candidates = self.image_queue.get_entries_after(timestamp, milliseconds=Constants.PADDING_AFTER)
+            # For end events, get screenshot after (after the burst ends)
+            candidates = self.image_queue.get_entries_after(
+                timestamp, milliseconds=Constants.PADDING_AFTER
+            )
             return candidates[0] if candidates else None
 
-    def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> List[dict]:
+    def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> list:
         """
-        Get all events between two timestamps from the all_events queue and remove them.
+        Get all events (of ALL types) between two timestamps.
+        Events are assigned to bursts based on which burst they fall into.
+        An event belongs to a burst if: start_timestamp <= event.timestamp < end_timestamp
 
         Args:
             start_timestamp: Start time (inclusive)
-            end_timestamp: End time (exclusive)
+            end_timestamp: End time (exclusive). If inf, include all remaining events.
 
         Returns:
             List of serialized events
         """
-        events_to_keep = []
         events_to_process = []
+        events_to_keep = deque()
 
-        for e in self.event_queue.all_events:
-            if start_timestamp <= e.timestamp < end_timestamp:
-                events_to_process.append(e)
-            else:
-                events_to_keep.append(e)
+        with self.event_queue._lock:
+            for e in self.event_queue.all_events:
+                if start_timestamp <= e.timestamp < end_timestamp:
+                    events_to_process.append(e)
+                else:
+                    events_to_keep.append(e)
 
-        # Update the queue to only contain events outside the range
-        self.event_queue.all_events = deque(events_to_keep)
+            # Update the queue to only contain events outside the range
+            self.event_queue.all_events = events_to_keep
 
         # Serialize the processed events
         serialized = [self._serialize_event(e) for e in events_to_process]
@@ -169,12 +193,14 @@ class AggregationWorker:
     def cleanup_old_events(self, oldest_timestamp: float):
         """
         Clean up events older than the given timestamp from all_events queue.
+        Note: This is now less critical since events are removed as they're aggregated.
 
         Args:
             oldest_timestamp: Remove events older than this timestamp
         """
         with self._lock:
-            self.event_queue.all_events = deque([
-                e for e in self.event_queue.all_events
-                if e.timestamp >= oldest_timestamp
-            ])
+            with self.event_queue._lock:
+                self.event_queue.all_events = deque([
+                    e for e in self.event_queue.all_events
+                    if e.timestamp >= oldest_timestamp
+                ])

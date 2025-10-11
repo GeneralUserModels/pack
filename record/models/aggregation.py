@@ -12,6 +12,7 @@ class AggregationConfig:
 class AggregationRequest:
     """Represents a request for a screenshot at a specific time."""
     timestamp: float
+    end_timestamp: Optional[float]
     reason: str  # e.g., "keyboard_start", "mouse_move_end"
     event_type: str  # e.g., "key", "move"
     is_start: bool  # True for start, False for end
