@@ -3,6 +3,7 @@ import json
 import ast
 from collections import deque, defaultdict
 from typing import Deque, Dict, List, Optional
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,6 +17,12 @@ EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}
 EVENT_COLOR = {'key': 'tab:purple', 'click': 'tab:red', 'move': 'tab:green', 'scroll': 'tab:orange'}
 MARKER_SIZE = 24
 EVENT_THROTTLE_MS = 75
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=r"^Starting a Matplotlib GUI outside of the main thread will likely fail\.$"
+)
 
 
 class RealtimeVisualizer:
@@ -216,9 +223,6 @@ class RealtimeVisualizer:
                 col = EVENT_COLOR.get(coarse, "tab:gray")
                 self.ax.barh([y], [d], left=[s], height=0.6 * 0.8, align='center',
                              color=col, alpha=0.22, edgecolor="black", linewidth=0.4, zorder=1)
-                label_x = s + d + 0.01
-                if label_x < window_end_rel:
-                    self.ax.text(label_x, y, coarse, va='center', fontsize=7, alpha=0.7, zorder=2)
 
         xs = []
         ys = []
@@ -245,7 +249,7 @@ class RealtimeVisualizer:
 
         info = f"Window: {self.window_s}s | events: {len(self.events)} | bursts stored: {len(self.bursts)}"
         self.fig.canvas.manager.set_window_title("Realtime Input Visualizer")
-        self.ax.text(0.995, 0.01, info, ha='right', va='bottom', transform=self.fig.transFigure, fontsize=8, alpha=0.7)
+        self.ax.text(0.995, 0.01, info, ha='right', va='bottom', transform=self.fig.transFigure, fontsize=16, alpha=0.7)
 
     def run(self):
         self.ani = animation.FuncAnimation(self.fig, self._draw, interval=self.interval_ms, blit=False, cache_frame_data=False)

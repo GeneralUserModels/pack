@@ -1,6 +1,5 @@
 import threading
 import json
-from typing import Optional
 from collections import deque
 from record.models.aggregation import AggregationRequest, ProcessedAggregation
 
@@ -25,6 +24,7 @@ class AggregationWorker:
 
         self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
         self.processed_requests = set()
+        self.processed_event_timestamps = set()  # Track which events have been processed
 
     def process_aggregation(self, request: AggregationRequest) -> ProcessedAggregation:
         """
@@ -84,8 +84,14 @@ class AggregationWorker:
 
         with self.event_queue._lock:
             for e in self.event_queue.all_events:
+                # Only process if not already processed (avoid duplicates)
+                event_key = (e.timestamp, e.event_type, id(e))
+
                 if start_timestamp <= e.timestamp < end_timestamp:
-                    events_to_process.append(e)
+                    if event_key not in self.processed_event_timestamps:
+                        events_to_process.append(e)
+                        self.processed_event_timestamps.add(event_key)
+                    # Don't keep it in the queue if it's in range
                 else:
                     events_to_keep.append(e)
 
@@ -122,16 +128,23 @@ class AggregationWorker:
         except Exception as e:
             print(f"Error saving aggregation to JSONL: {e}")
 
-    def cleanup_old_events(self, oldest_timestamp: float):
+    def validate_events_processed(self):
         """
-        Clean up events older than the given timestamp from all_events queue.
-
-        Args:
-            oldest_timestamp: Remove events older than this timestamp
+        Check for any unprocessed events that have fallen through the cracks.
+        This should be called at shutdown to ensure no events were lost.
         """
         with self._lock:
             with self.event_queue._lock:
-                self.event_queue.all_events = deque([
-                    e for e in self.event_queue.all_events
-                    if e.timestamp >= oldest_timestamp
-                ])
+                if self.event_queue.all_events:
+                    orphaned_count = len(self.event_queue.all_events)
+                    print(f"\n⚠️  WARNING: {orphaned_count} orphaned events found in all_events queue!")
+                    print("These events were not captured in any aggregation:")
+
+                    for e in list(self.event_queue.all_events)[:10]:  # Show first 10
+                        print(f"  - {e.event_type} at {e.timestamp:.3f}")
+
+                    if orphaned_count > 10:
+                        print(f"  ... and {orphaned_count - 10} more")
+
+                    return False
+                return True

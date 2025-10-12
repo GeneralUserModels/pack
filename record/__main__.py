@@ -116,8 +116,6 @@ class ScreenRecorder:
 
         self.processed_aggregations += 1
 
-        self.aggregation_worker.cleanup_old_events(request.timestamp)
-
     def _on_new_image(self, image):
         """Callback for saving all buffer images (only used if buffer_all)."""
         if self.buffer_all:
@@ -196,6 +194,11 @@ class ScreenRecorder:
         print(f"\nSession saved to: {self.session_dir}")
         print(f"Aggregations saved to: {self.aggregation_worker.aggregations_file}")
         print(f"Total aggregations processed: {self.processed_aggregations}")
+
+        # Validate that all events were processed
+        all_valid = self.aggregation_worker.validate_events_processed()
+        if all_valid:
+            print("✓ All events were successfully captured in aggregations")
 
     def run(self):
         """Run the recorder until interrupted."""
