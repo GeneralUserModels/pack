@@ -44,7 +44,10 @@ class ScreenRecorder:
 
         print(f"Session directory: {self.session_dir}")
 
+        self.image_queue = ImageQueue(max_length=self.image_buffer_size)
+
         self.input_event_queue = EventQueue(
+            image_queue=self.image_queue,
             click_config=AggregationConfig(
                 gap_threshold=Constants.CLICK_GAP_THRESHOLD,
                 total_threshold=Constants.CLICK_TOTAL_THRESHOLD
@@ -65,13 +68,10 @@ class ScreenRecorder:
             session_dir=self.session_dir
         )
 
-        self.image_queue = ImageQueue(max_length=self.image_buffer_size)
-
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
 
         self.aggregation_worker = AggregationWorker(
             event_queue=self.input_event_queue,
-            image_queue=self.image_queue,
             save_worker=self.save_worker,
         )
 
@@ -229,7 +229,7 @@ def main():
         "-s", "--buffer-seconds",
         type=int,
         default=24,
-        help="Number of seconds to keep in buffer (default: 12)"
+        help="Number of seconds to keep in buffer (default: 24)"
     )
     parser.add_argument(
         "-b", "--buffer-all-images",

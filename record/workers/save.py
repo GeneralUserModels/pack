@@ -20,12 +20,10 @@ class SaveWorker:
         self.buffer_imgs_dir = self.session_dir / "buffer_imgs"
         self.buffer_all = buffer_all
 
-        # Create directories
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.screenshots_dir.mkdir(exist_ok=True)
         self.buffer_imgs_dir.mkdir(exist_ok=True)
 
-        # File paths for JSONL logs
         self.input_log = self.session_dir / "input_events.jsonl"
         self.screenshot_log = self.session_dir / "screenshots.jsonl"
 
@@ -60,13 +58,10 @@ class SaveWorker:
             filename = f"{image.timestamp:.6f}_reason_{save_reason}.jpg"
             filepath = save_dir / filename
 
-            # Always attempt to write the image if force_save True or buffer_all True
             if force_save or self.buffer_all:
-                # image.screenshot is expected to be an RGB numpy array
                 try:
                     img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
                 except Exception:
-                    # If it's already BGR or a grayscale, try writing directly
                     img_bgr = image.screenshot
                 cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
 

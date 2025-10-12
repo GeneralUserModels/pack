@@ -1,16 +1,18 @@
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional, Dict
+from typing import Callable, Optional, Dict, Any
 from collections import deque
 from record.models.event import InputEvent, EventType
 from record.models.aggregation import AggregationConfig, AggregationRequest
+from record.constants import Constants
 
 
 class EventQueue:
 
     def __init__(
         self,
+        image_queue: Any,  # ImageQueue instance
         click_config: Optional[AggregationConfig] = None,
         move_config: Optional[AggregationConfig] = None,
         scroll_config: Optional[AggregationConfig] = None,
@@ -23,6 +25,7 @@ class EventQueue:
         Initialize the input event queue.
 
         Args:
+            image_queue: ImageQueue instance for fetching screenshots
             click_config: Configuration for click event aggregation
             move_config: Configuration for move event aggregation
             scroll_config: Configuration for scroll event aggregation
@@ -31,6 +34,7 @@ class EventQueue:
             session_dir: Directory to save events JSONL
             safety_margin: Safety margin in seconds to avoid async delivery issues
         """
+        self.image_queue = image_queue
         self.session_dir = session_dir
         self.safety_margin = safety_margin
         self.configs = {
@@ -168,10 +172,12 @@ class EventQueue:
             'end_time': None,
             'start_request': AggregationRequest(
                 timestamp=event.timestamp,
+                end_timestamp=None,
                 reason=f"{event_type}_start",
                 event_type=event_type,
                 is_start=True,
-                end_timestamp=None
+                screenshot=None,
+                screenshot_path=None
             ),
             'end_request': None
         }
@@ -193,10 +199,12 @@ class EventQueue:
         burst['end_time'] = end_time
         burst['end_request'] = AggregationRequest(
             timestamp=end_time,
+            end_timestamp=None,
             reason=f"{burst['event_type']}_end",
             event_type=burst['event_type'],
             is_start=False,
-            end_timestamp=None
+            screenshot=None,
+            screenshot_path=None
         )
 
         self.completed_bursts.append(burst)
@@ -283,6 +291,7 @@ class EventQueue:
     def _emit_burst_requests(self, burst: dict) -> None:
         """
         Emit both start and end requests for a burst through the callback.
+        Fetches and attaches screenshots at this point.
 
         Args:
             burst: Burst dictionary with start_request and end_request
@@ -291,6 +300,9 @@ class EventQueue:
         end_req = burst['end_request']
 
         start_req.end_timestamp = end_req.timestamp
+
+        self._attach_screenshot(start_req, is_start=True)
+        self._attach_screenshot(end_req, is_start=False)
 
         if self._callback:
             try:
@@ -303,6 +315,46 @@ class EventQueue:
                 self._callback(end_req)
             except Exception as e:
                 print(f"Error in burst end callback: {e}")
+
+    def _attach_screenshot(self, request: AggregationRequest, is_start: bool) -> None:
+        """
+        Fetch and attach a screenshot to the request.
+
+        Args:
+            request: AggregationRequest to attach screenshot to
+            is_start: If True, look for screenshot before; if False, look for screenshot after
+        """
+        screenshot = self._find_screenshot(request.timestamp, is_start)
+        if screenshot is not None:
+            request.screenshot = screenshot
+            # Screenshot path would be set by the aggregation worker when saving
+
+    def _find_screenshot(self, timestamp: float, is_start: bool) -> Optional[Any]:
+        """
+        Find the best matching screenshot for the given timestamp.
+        First tries to find within padding window, falls back to closest available screenshot.
+
+        Args:
+            timestamp: Target timestamp
+            is_start: If True, look for screenshot ~50ms before; if False, ~50ms after
+
+        Returns:
+            Screenshot object or None if not found
+        """
+        if is_start:
+            candidates = self.image_queue.get_entries_before(
+                timestamp, milliseconds=Constants.PADDING_BEFORE
+            )
+            if candidates:
+                return candidates[-1]
+            return None
+        else:
+            candidates = self.image_queue.get_entries_after(
+                timestamp, milliseconds=Constants.PADDING_AFTER
+            )
+            if candidates:
+                return candidates[0]
+            return None
 
     def _poll_worker(self) -> None:
         """Worker thread that checks for stale bursts and processes ready ones."""
