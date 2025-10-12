@@ -10,7 +10,6 @@ class RawLog:
     timestamp: str = None
     event_type: str = None
     details: Dict[str, Any] = field(default_factory=dict)
-    monitor: Dict[str, int] = field(default_factory=dict)
     cursor_pos: Optional[Tuple[int, int]] = (None, None)
     screenshot_bytes: Optional[bytes] = field(default=None, repr=False)
     screenshot_size: Optional[Tuple[int, int]] = field(default=None, repr=False)
@@ -28,7 +27,6 @@ class RawLog:
         self.timestamp = data.get('timestamp')
         self.event_type = data.get('event_type')
         self.details = data.get('details', {})
-        self.monitor = data.get('monitor', {})
         self.cursor_pos = tuple(data.get('cursor_pos', (None, None)))
         self.screenshot_bytes = data.get('screenshot_bytes')
         self.screenshot_size = tuple(data.get('screenshot_size', (0, 0)))
@@ -40,7 +38,6 @@ class RawLog:
             timestamp=self.timestamp,
             event_type=self.event_type,
             details=self.details.copy(),
-            monitor=self.monitor.copy(),
             cursor_pos=self.cursor_pos,
             screenshot_bytes=self.screenshot_bytes,
             screenshot_size=self.screenshot_size,

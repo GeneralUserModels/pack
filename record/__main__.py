@@ -1,84 +1,273 @@
-import datetime
+import argparse
+import time
+import signal
+import sys
 import threading
 from pathlib import Path
+from datetime import datetime
+from pynput import mouse, keyboard
 
-from pynput import keyboard, mouse
-from record import EventQueue, io_worker, poll_worker, ScreenshotManager, InputEventHandler
+from record.models import ImageQueue, AggregationConfig, EventQueue
+from record.workers import SaveWorker, AggregationWorker
+from record.handlers import InputEventHandler, ScreenshotHandler
+from record.monitor import RealtimeVisualizer, plot_summary_stats
+from record.constants import Constants
 
 
-stop_event = threading.Event()
+class ScreenRecorder:
 
-SESSION_DIR = Path(__file__).parent.parent / "logs" / f"session_v2_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-SCREENSHOT_DIR = SESSION_DIR / "screenshots"
-LOG_FILE = SESSION_DIR / "events.jsonl"
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
-SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        fps: int = 16,
+        buffer_seconds: int = 12,
+        buffer_all: bool = False,
+        monitor: bool = False
+    ):
+        """
+        Initialize the screen recorder.
 
-DEBOUNCING_THRESHOLDS = {
-    "mouse_move": 2.0,
-    "mouse_scroll": 3.0,
-    "keyboard_press": 3.0,
-    "keyboard_release": 3.0,
-}
+        Args:
+            fps: Frames per second to capture
+            buffer_seconds: Number of seconds to keep in buffer
+            buffer_all: If True, save all screenshots to disk
+            monitor: If True, enable real-time monitoring
+        """
+        self.fps = fps
+        self.buffer_seconds = buffer_seconds
+        self.buffer_all = buffer_all
 
-BUFFER_FPS = 60
-BUFFER_SECONDS = 3.0
-LOOKBACK_MS = 100
-FORWARD_DELAY_MS = 100
+        self.image_buffer_size = fps * buffer_seconds
+        self.event_buffer_size = fps * buffer_seconds * 30
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v9_{timestamp}"
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Session directory: {self.session_dir}")
+
+        self.image_queue = ImageQueue(max_length=self.image_buffer_size)
+
+        self.input_event_queue = EventQueue(
+            image_queue=self.image_queue,
+            click_config=AggregationConfig(
+                gap_threshold=Constants.CLICK_GAP_THRESHOLD,
+                total_threshold=Constants.CLICK_TOTAL_THRESHOLD
+            ),
+            move_config=AggregationConfig(
+                gap_threshold=Constants.MOVE_GAP_THRESHOLD,
+                total_threshold=Constants.MOVE_TOTAL_THRESHOLD
+            ),
+            scroll_config=AggregationConfig(
+                gap_threshold=Constants.SCROLL_GAP_THRESHOLD,
+                total_threshold=Constants.SCROLL_TOTAL_THRESHOLD
+            ),
+            key_config=AggregationConfig(
+                gap_threshold=Constants.KEY_GAP_THRESHOLD,
+                total_threshold=Constants.KEY_TOTAL_THRESHOLD
+            ),
+            poll_interval=1.0,
+            session_dir=self.session_dir
+        )
+
+        self.save_worker = SaveWorker(self.session_dir, buffer_all)
+
+        self.aggregation_worker = AggregationWorker(
+            event_queue=self.input_event_queue,
+            save_worker=self.save_worker,
+        )
+
+        self.input_event_queue.set_callback(self._on_aggregation_request)
+        self.image_queue.add_callback(self._on_new_image)
+
+        self.input_handler = InputEventHandler(self.input_event_queue)
+
+        self.screenshot_manager = ScreenshotHandler(
+            image_queue=self.image_queue,
+            fps=self.fps
+        )
+
+        self.mouse_listener = None
+        self.keyboard_listener = None
+
+        self.running = False
+        self.processed_aggregations = 0
+
+        self.monitor_thread = None
+        if monitor:
+            self._setup_monitor()
+
+    def _on_aggregation_request(self, request):
+        """Callback when a single aggregation request is ready for processing."""
+        if not request:
+            return
+
+        processed = self.aggregation_worker.process_aggregation(request)
+        if self.processed_aggregations == 0:
+            print("-------------------------------------------------------------------")
+            print(">>>>                    Aggregation Summary                    <<<<")
+            print(f">>>> Session Directory: {str(self.session_dir.name):37s} <<<<")
+            print("-------------------------------------------------------------------")
+            print("Screenshot | Capture Reason | # Events | Screenshot Path")
+            print("-------------------------------------------------------------------")
+
+        screenshot_status = "✓" if processed.screenshot else "✗"
+        path_info = f"{processed.screenshot_path.split('/')[-1]}" if processed.screenshot_path else ""
+        print(f"     {screenshot_status}     | {processed.request.reason:15s}"
+              f"| {str(len(processed.events)):8s} | {path_info}")
+
+        self.processed_aggregations += 1
+
+    def _on_new_image(self, image):
+        """Callback for saving all buffer images (only used if buffer_all)."""
+        if self.buffer_all:
+            self.save_worker.save_buffer_image(image)
+
+    def _setup_monitor(self):
+        """Set up real-time monitoring thread."""
+        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+        self.monitor_thread.start()
+
+    def _run_monitor(self):
+        """Run the real-time visualizer."""
+        events_path = self.session_dir / "events.jsonl"
+        aggr_path = self.session_dir / "aggregations.jsonl"
+        rv = RealtimeVisualizer(events_path, aggr_path, refresh_hz=16, window_s=30.0)
+        rv.run()
+
+    def start(self):
+        """Start recording."""
+        if self.running:
+            print("Recorder already running")
+            return
+
+        self.running = True
+        print(f"Starting screen recorder at {self.fps} FPS")
+        print(f"Buffer: {self.buffer_seconds} seconds ({self.image_buffer_size} frames)")
+        print("Input event aggregation: ENABLED (polling worker)")
+        print(f"  - Save all images: {self.buffer_all}")
+
+        self.input_event_queue.start()
+        self.screenshot_manager.start()
+
+        self.mouse_listener = mouse.Listener(
+            on_move=self.input_handler.on_move,
+            on_click=self.input_handler.on_click,
+            on_scroll=self.input_handler.on_scroll
+        )
+        self.mouse_listener.start()
+
+        self.keyboard_listener = keyboard.Listener(
+            on_press=self.input_handler.on_press,
+            on_release=self.input_handler.on_release
+        )
+        self.keyboard_listener.start()
+
+        print("Recorder started. Press Ctrl+C to stop.")
+
+    def stop(self):
+        """Stop recording and process remaining events."""
+        if not self.running:
+            return
+
+        print("-------------------------------------------------------------------")
+        print(">>>>                    Stopping Recorder                      <<<<")
+        print(">>>>             Cleaning Up Remaining Processes...            <<<<")
+        print("-------------------------------------------------------------------")
+
+        self.running = False
+
+        # Stop listeners
+        if self.mouse_listener:
+            self.mouse_listener.stop()
+        if self.keyboard_listener:
+            self.keyboard_listener.stop()
+
+        self.screenshot_manager.stop()
+        self.input_event_queue.stop()
+
+        self.input_event_queue.process_all_remaining()
+
+        time.sleep(0.5)
+
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=0.1)
+
+        print(f"\nSession saved to: {self.session_dir}")
+        print(f"Aggregations saved to: {self.aggregation_worker.aggregations_file}")
+        print(f"Total aggregations processed: {self.processed_aggregations}")
+
+        all_valid = self.aggregation_worker.validate_events_processed()
+        if all_valid:
+            print("✓ All events were successfully captured in aggregations")
+        else:
+            print("✗ Some events were NOT captured in any aggregation")
+
+        time.sleep(1)
+        self._create_summary()
+
+    def _create_summary(self):
+        summary_path = self.session_dir / "summary.png"
+        print(f"\nSaving summary plot in {summary_path} ...")
+        agg_path = self.session_dir / "aggregations.jsonl"
+        events_path = self.session_dir / "events.jsonl"
+
+        if agg_path.exists() and events_path.exists():
+            plot_summary_stats(self.session_dir, agg_path, events_path, summary_path)
+
+    def run(self):
+        """Run the recorder until interrupted."""
+        def signal_handler(sig, frame):
+            self.stop()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        self.start()
+
+        try:
+            while self.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.stop()
 
 
 def main():
-    print(f"Session started: {SESSION_DIR}")
-    print(f"Screenshots: {SCREENSHOT_DIR}")
-    print(f"Using buffered screenshots at {BUFFER_FPS} FPS, keeping {BUFFER_SECONDS}s in memory")
-
-    event_queue = EventQueue(maxsize=1024, debouncing_thresholds=DEBOUNCING_THRESHOLDS)
-    screenshot_manager = ScreenshotManager(fps=BUFFER_FPS, buffer_seconds=BUFFER_SECONDS)
-
-    screenshot_manager.start()
-    print("Buffered screenshot capture started")
-
-    threading.Thread(target=io_worker, args=(event_queue, SCREENSHOT_DIR, LOG_FILE), daemon=True).start()
-    threading.Thread(target=poll_worker, args=(screenshot_manager, event_queue, 60.0), daemon=True).start()
-
-    h = InputEventHandler(
-        event_queue,
-        screenshot_manager,
-        move_interval=1.0,
-        lookback_ms=LOOKBACK_MS,
-        forward_delay_ms=FORWARD_DELAY_MS
+    parser = argparse.ArgumentParser(
+        description="Record screen activity with input events"
+    )
+    parser.add_argument(
+        "-f", "--fps",
+        type=int,
+        default=16,
+        help="Frames per second to capture (default: 16)"
+    )
+    parser.add_argument(
+        "-s", "--buffer-seconds",
+        type=int,
+        default=12,
+        help="Number of seconds to keep in buffer (default: 24)"
+    )
+    parser.add_argument(
+        "-b", "--buffer-all-images",
+        action="store_true",
+        help="Save all buffer images to disk"
+    )
+    parser.add_argument(
+        "-m", "--monitor",
+        action="store_true",
+        help="Enable real-time monitoring of the last session"
     )
 
-    print("Starting input listeners...")
+    args = parser.parse_args()
 
-    try:
-        with keyboard.Listener(on_press=h.on_press, on_release=h.on_release) as kl, \
-                mouse.Listener(on_click=h.on_click, on_move=h.on_move, on_scroll=h.on_scroll) as ml:
-
-            print("Input listeners active. Press Ctrl+C to stop.")
-
-            try:
-                while True:
-                    if stop_event.wait(timeout=1.0):
-                        break
-            except KeyboardInterrupt:
-                print("\nReceived interrupt signal...")
-                stop_event.set()
-
-            print("Stopping listeners...")
-
-    except Exception as e:
-        print(f"Error in main loop: {e}")
-    finally:
-        print("Cleaning up...")
-        screenshot_manager.stop()
-
-        try:
-            event_queue.queue.join()
-        except Exception as e:
-            print(f"Error while waiting for queue to empty: {e}")
-
-        print("Cleanup complete.")
+    recorder = ScreenRecorder(
+        fps=args.fps,
+        buffer_seconds=args.buffer_seconds,
+        buffer_all=args.buffer_all_images,
+        monitor=args.monitor
+    )
+    recorder.run()
 
 
 if __name__ == "__main__":
