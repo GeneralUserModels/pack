@@ -87,6 +87,7 @@ class EventQueue:
     def enqueue(self, event: InputEvent) -> None:
         """
         Add an event to all_events and check if it triggers burst boundaries.
+        Caches screenshot alongside event in the aggregation queue.
 
         Args:
             event: Input event to add
@@ -104,12 +105,13 @@ class EventQueue:
 
             # Case 1: Queue is empty, start new burst
             if not queue:
-                burst_id = self._start_burst(agg_type, event)
-                queue.append(event)
+                screenshot = self._find_screenshot_before(event.timestamp)
+                burst_id = self._start_burst(agg_type, event, screenshot)
+                queue.append((event, screenshot))
                 return
 
-            last_event = queue[-1]
-            first_event = queue[0]
+            last_event, last_screenshot = queue[-1]
+            first_event, first_screenshot = queue[0]
 
             gap_diff = event.timestamp - last_event.timestamp
             total_diff = event.timestamp - first_event.timestamp
@@ -121,44 +123,59 @@ class EventQueue:
             if not gap_ok:
                 burst_id = self._find_burst_by_type(agg_type)
                 if burst_id is not None:
-                    self._end_burst(burst_id, last_event.timestamp)
+                    self._end_burst(burst_id, last_event.timestamp, last_screenshot)
 
-                burst_id = self._start_burst(agg_type, event)
+                screenshot = self._find_screenshot_before(event.timestamp)
+                burst_id = self._start_burst(agg_type, event, screenshot)
                 queue.clear()
-                queue.append(event)
+                queue.append((event, screenshot))
 
             # Case 3: Total threshold exceeded (but gap OK), split the burst
             elif not total_ok:
                 queue_list = list(queue)
                 mid_timestamp = (first_event.timestamp + last_event.timestamp) / 2
 
-                second_half = [e for e in queue_list if e.timestamp > mid_timestamp]
+                first_half = [(e, s) for e, s in queue_list if e.timestamp <= mid_timestamp]
+                second_half = [(e, s) for e, s in queue_list if e.timestamp > mid_timestamp]
 
                 burst_id = self._find_burst_by_type(agg_type)
-                if burst_id is not None:
-                    self._end_burst(burst_id, mid_timestamp)
+                if burst_id is not None and first_half:
+                    self._end_burst(burst_id, first_half[-1][0].timestamp, first_half[-1][1])
 
                 if second_half:
-                    burst_id = self._start_burst(agg_type, second_half[0])
+                    updated_second_half = []
+                    for i, (e, s) in enumerate(second_half):
+                        if i == 0:
+                            new_screenshot = self._find_screenshot_after(mid_timestamp)
+                        else:
+                            new_screenshot = s
+                        updated_second_half.append((e, new_screenshot))
+
+                    burst_id = self._start_burst(agg_type, second_half[0][0], updated_second_half[0][1])
                     queue.clear()
-                    queue.extend(second_half)
-                    queue.append(event)
+                    queue.extend(updated_second_half)
+
+                    screenshot = self._find_screenshot_before(event.timestamp)
+                    queue.append((event, screenshot))
                 else:
-                    burst_id = self._start_burst(agg_type, event)
+                    screenshot = self._find_screenshot_before(event.timestamp)
+                    burst_id = self._start_burst(agg_type, event, screenshot)
                     queue.clear()
-                    queue.append(event)
+                    queue.append((event, screenshot))
 
             # Case 4: Within thresholds, just add to current burst
             else:
-                queue.append(event)
+                screenshot = self._find_screenshot_before(event.timestamp)
+                queue.append((event, screenshot))
 
-    def _start_burst(self, event_type: str, event: InputEvent) -> int:
+    def _start_burst(self, event_type: str, event: InputEvent, screenshot: Optional[Any]) -> int:
         """
         Start a new burst and return its ID.
 
         Args:
             event_type: Type of event ('click', 'move', 'scroll', 'key')
             event: The triggering event
+            screenshot: Cached screenshot for this event
 
         Returns:
             Burst ID
@@ -169,14 +186,16 @@ class EventQueue:
         self.active_bursts[burst_id] = {
             'event_type': event_type,
             'start_time': event.timestamp,
+            'start_screenshot': screenshot,
             'end_time': None,
+            'end_screenshot': None,
             'start_request': AggregationRequest(
                 timestamp=event.timestamp,
                 end_timestamp=None,
                 reason=f"{event_type}_start",
                 event_type=event_type,
                 is_start=True,
-                screenshot=None,
+                screenshot=screenshot,
                 screenshot_path=None
             ),
             'end_request': None
@@ -184,26 +203,28 @@ class EventQueue:
 
         return burst_id
 
-    def _end_burst(self, burst_id: int, end_time: float) -> None:
+    def _end_burst(self, burst_id: int, end_time: float, screenshot: Optional[Any]) -> None:
         """
         End a burst and move it to completed queue.
 
         Args:
             burst_id: ID of the burst to end
             end_time: Timestamp when the burst ended
+            screenshot: Cached screenshot for the end event
         """
         if burst_id not in self.active_bursts:
             return
 
         burst = self.active_bursts[burst_id]
         burst['end_time'] = end_time
+        burst['end_screenshot'] = screenshot
         burst['end_request'] = AggregationRequest(
             timestamp=end_time,
             end_timestamp=None,
             reason=f"{burst['event_type']}_end",
             event_type=burst['event_type'],
             is_start=False,
-            screenshot=None,
+            screenshot=screenshot,
             screenshot_path=None
         )
 
@@ -216,6 +237,36 @@ class EventQueue:
             if burst['event_type'] == event_type:
                 return burst_id
         return None
+
+    def _find_screenshot_before(self, timestamp: float) -> Optional[Any]:
+        """Find screenshot before timestamp (for start events)."""
+        candidates = self.image_queue.get_entries_before(
+            timestamp, milliseconds=Constants.PADDING_BEFORE
+        )
+        if candidates:
+            return candidates[-1]
+
+        # Fallback to closest before
+        closest = self.image_queue.get_closest_before(timestamp)
+        if closest:
+            print(f"⚠️  No screenshot found within {Constants.PADDING_BEFORE}ms before {timestamp:.3f}. "
+                  f"Using closest available at {closest.timestamp:.3f} ({(timestamp - closest.timestamp) * 1000:.1f}ms before)")
+        return closest
+
+    def _find_screenshot_after(self, timestamp: float) -> Optional[Any]:
+        """Find screenshot after timestamp (for end events and split points)."""
+        candidates = self.image_queue.get_entries_after(
+            timestamp, milliseconds=Constants.PADDING_AFTER
+        )
+        if candidates:
+            return candidates[0]
+
+        # Fallback to closest after
+        closest = self.image_queue.get_closest_after(timestamp)
+        if closest:
+            print(f"⚠️  No screenshot found within {Constants.PADDING_AFTER}ms after {timestamp:.3f}. "
+                  f"Using closest available at {closest.timestamp:.3f} ({(closest.timestamp - timestamp) * 1000:.1f}ms after)")
+        return closest
 
     def _save_event_to_jsonl(self, event: InputEvent) -> None:
         """Save event to JSONL file."""
@@ -242,15 +293,15 @@ class EventQueue:
 
                 queue = self.aggregations[event_type]
                 if queue:
-                    last_event = queue[-1]
+                    last_event, last_screenshot = queue[-1]
                     time_since_last_event = current_time - last_event.timestamp
 
                     if time_since_last_event > config.gap_threshold:
-                        burst_ids_to_end.append((burst_id, event_type, last_event.timestamp))
+                        burst_ids_to_end.append((burst_id, event_type, last_event.timestamp, last_screenshot))
 
-            for burst_id, event_type, end_time in burst_ids_to_end:
+            for burst_id, event_type, end_time, screenshot in burst_ids_to_end:
                 if burst_id in self.active_bursts:
-                    self._end_burst(burst_id, end_time)
+                    self._end_burst(burst_id, end_time, screenshot)
                     self.aggregations[event_type].clear()
 
     def _process_ready_bursts(self) -> None:
@@ -291,7 +342,7 @@ class EventQueue:
     def _emit_burst_requests(self, burst: dict) -> None:
         """
         Emit both start and end requests for a burst through the callback.
-        Fetches and attaches screenshots at this point.
+        Screenshots are already cached in the requests.
 
         Args:
             burst: Burst dictionary with start_request and end_request
@@ -301,60 +352,19 @@ class EventQueue:
 
         start_req.end_timestamp = end_req.timestamp
 
-        self._attach_screenshot(start_req, is_start=True)
-        self._attach_screenshot(end_req, is_start=False)
-
+        # Callback for start request
         if self._callback:
             try:
                 self._callback(start_req)
             except Exception as e:
                 print(f"Error in burst start callback: {e}")
 
+        # Callback for end request
         if self._callback:
             try:
                 self._callback(end_req)
             except Exception as e:
                 print(f"Error in burst end callback: {e}")
-
-    def _attach_screenshot(self, request: AggregationRequest, is_start: bool) -> None:
-        """
-        Fetch and attach a screenshot to the request.
-
-        Args:
-            request: AggregationRequest to attach screenshot to
-            is_start: If True, look for screenshot before; if False, look for screenshot after
-        """
-        screenshot = self._find_screenshot(request.timestamp, is_start)
-        if screenshot is not None:
-            request.screenshot = screenshot
-            # Screenshot path would be set by the aggregation worker when saving
-
-    def _find_screenshot(self, timestamp: float, is_start: bool) -> Optional[Any]:
-        """
-        Find the best matching screenshot for the given timestamp.
-        First tries to find within padding window, falls back to closest available screenshot.
-
-        Args:
-            timestamp: Target timestamp
-            is_start: If True, look for screenshot ~50ms before; if False, ~50ms after
-
-        Returns:
-            Screenshot object or None if not found
-        """
-        if is_start:
-            candidates = self.image_queue.get_entries_before(
-                timestamp, milliseconds=Constants.PADDING_BEFORE
-            )
-            if candidates:
-                return candidates[-1]
-            return None
-        else:
-            candidates = self.image_queue.get_entries_after(
-                timestamp, milliseconds=Constants.PADDING_AFTER
-            )
-            if candidates:
-                return candidates[0]
-            return None
 
     def _poll_worker(self) -> None:
         """Worker thread that checks for stale bursts and processes ready ones."""
@@ -382,10 +392,10 @@ class EventQueue:
                 burst = self.active_bursts[burst_id]
                 queue = self.aggregations[burst['event_type']]
                 if queue:
-                    last_event = queue[-1]
-                    self._end_burst(burst_id, last_event.timestamp)
+                    last_event, last_screenshot = queue[-1]
+                    self._end_burst(burst_id, last_event.timestamp, last_screenshot)
                 else:
-                    self._end_burst(burst_id, current_time)
+                    self._end_burst(burst_id, current_time, None)
 
             while self.completed_bursts:
                 burst = self.completed_bursts.popleft()
