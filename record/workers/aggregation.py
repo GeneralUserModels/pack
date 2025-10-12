@@ -31,7 +31,6 @@ class AggregationWorker:
 
         self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
 
-        # Track processed bursts to avoid double-processing
         self.processed_requests = set()
 
     def process_aggregation(self, request: AggregationRequest) -> ProcessedAggregation:
@@ -45,7 +44,6 @@ class AggregationWorker:
             ProcessedAggregation object with matched screenshot and events
         """
         with self._lock:
-            # Skip if already processed
             request_key = (request.timestamp, request.reason)
             if request_key in self.processed_requests:
                 return ProcessedAggregation(
@@ -57,8 +55,6 @@ class AggregationWorker:
 
             self.processed_requests.add(request_key)
 
-            # For start requests: screenshot ~50ms BEFORE
-            # For end requests: screenshot ~50ms AFTER
             screenshot = self._find_screenshot(request.timestamp, request.is_start)
 
             screenshot_path = None
@@ -67,9 +63,6 @@ class AggregationWorker:
                     screenshot, force_save=True, save_reason=request.reason
                 )
 
-            # Get all events that fall within this burst
-            # Start request: from this timestamp to end_timestamp (next burst)
-            # End request: uses end_timestamp from when it was created
             if request.end_timestamp is None:
                 request.end_timestamp = float('inf')
 
@@ -98,13 +91,11 @@ class AggregationWorker:
             Screenshot object or None if not found
         """
         if is_start:
-            # For start events, get screenshot before (before the burst begins)
             candidates = self.image_queue.get_entries_before(
                 timestamp, milliseconds=Constants.PADDING_BEFORE
             )
             return candidates[-1] if candidates else None
         else:
-            # For end events, get screenshot after (after the burst ends)
             candidates = self.image_queue.get_entries_after(
                 timestamp, milliseconds=Constants.PADDING_AFTER
             )
@@ -133,36 +124,11 @@ class AggregationWorker:
                 else:
                     events_to_keep.append(e)
 
-            # Update the queue to only contain events outside the range
             self.event_queue.all_events = events_to_keep
 
-        # Serialize the processed events
-        serialized = [self._serialize_event(e) for e in events_to_process]
+        serialized = [e.to_dict() for e in events_to_process]
 
         return serialized
-
-    def _serialize_event(self, event) -> dict:
-        """Serialize an InputEvent to a dictionary."""
-        event_dict = {
-            'timestamp': event.timestamp,
-            'event_type': event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type),
-        }
-
-        # Add event-specific data
-        if hasattr(event, 'x') and hasattr(event, 'y'):
-            event_dict['x'] = event.x
-            event_dict['y'] = event.y
-        if hasattr(event, 'button'):
-            event_dict['button'] = str(event.button)
-        if hasattr(event, 'dx') and hasattr(event, 'dy'):
-            event_dict['dx'] = event.dx
-            event_dict['dy'] = event.dy
-        if hasattr(event, 'key'):
-            event_dict['key'] = str(event.key)
-        if hasattr(event, 'char'):
-            event_dict['char'] = event.char
-
-        return event_dict
 
     def _save_aggregation_to_jsonl(self, aggregation: ProcessedAggregation):
         """
@@ -179,8 +145,8 @@ class AggregationWorker:
                 'is_start': aggregation.request.is_start,
                 'screenshot_path': aggregation.screenshot_path,
                 'screenshot_timestamp': aggregation.screenshot.timestamp if aggregation.screenshot else None,
-                'num_events': len(aggregation.events),
-                'events': aggregation.events
+                'events': aggregation.events,
+                "cursor_position": aggregation.events[0]['cursor_position'] if aggregation.events else None
             }
 
             with open(self.aggregations_file, 'a') as f:

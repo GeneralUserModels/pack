@@ -27,17 +27,14 @@ class ImageQueue:
             item: Item to add (must have a timestamp attribute)
         """
         with self._lock:
-            # Insert in sorted order
             if not self._queue or item.timestamp >= self._queue[-1].timestamp:
                 self._queue.append(item)
             else:
-                # Convert to list, insert, and recreate deque
                 temp_list = list(self._queue)
                 idx = bisect.bisect_left([x.timestamp for x in temp_list], item.timestamp)
                 temp_list.insert(idx, item)
                 self._queue = deque(temp_list[-self.max_length:], maxlen=self.max_length)
 
-            # Trigger callbacks
             for callback in self._callbacks:
                 try:
                     callback(item)
@@ -56,9 +53,8 @@ class ImageQueue:
             List of items within the time window
         """
         with self._lock:
-            start_time = timestamp - (milliseconds / 1000.0)
-            return [item for item in self._queue
-                    if start_time <= item.timestamp <= timestamp]
+            candidates = [item for item in self._queue if item.timestamp <= timestamp]
+            return candidates if candidates else None
 
     def get_entries_after(self, timestamp: float, milliseconds: int) -> List[Any]:
         """
@@ -72,9 +68,8 @@ class ImageQueue:
             List of items within the time window
         """
         with self._lock:
-            end_time = timestamp + (milliseconds / 1000.0)
-            return [item for item in self._queue
-                    if timestamp <= item.timestamp <= end_time]
+            candidates = [item for item in self._queue if item.timestamp >= timestamp]
+            return candidates if candidates else None
 
     def get_latest(self) -> Optional[Any]:
         """

@@ -66,7 +66,6 @@ class EventQueue:
         self._lock = threading.RLock()
         self._callback: Optional[Callable[[AggregationRequest], None]] = None
 
-        # Polling worker
         self.poll_interval = poll_interval
         self._running = False
         self._poll_thread = None
@@ -89,11 +88,9 @@ class EventQueue:
             event: Input event to add
         """
         with self._lock:
-            # Add to global all_events queue
             self.all_events.append(event)
             self._save_event_to_jsonl(event)
 
-            # Map event to aggregation type
             agg_type = self.event_type_mapping.get(event.event_type)
             if agg_type is None:
                 return
@@ -131,17 +128,23 @@ class EventQueue:
                 queue_list = list(queue)
                 mid_timestamp = (first_event.timestamp + last_event.timestamp) / 2
 
-                # Find the burst and end it at midpoint
+                second_half = [e for e in queue_list if e.timestamp > mid_timestamp]
+
                 burst_id = self._find_burst_by_type(agg_type)
                 if burst_id is not None:
                     self._end_burst(burst_id, mid_timestamp)
 
-                # Start new burst with second half
-                burst_id = self._start_burst(agg_type, event)
-                queue.clear()
-                queue.append(event)
+                if second_half:
+                    burst_id = self._start_burst(agg_type, second_half[0])
+                    queue.clear()
+                    queue.extend(second_half)
+                    queue.append(event)
+                else:
+                    burst_id = self._start_burst(agg_type, event)
+                    queue.clear()
+                    queue.append(event)
 
-            # Case 4: Both thresholds OK, just append to current burst
+            # Case 4: Within thresholds, just add to current burst
             else:
                 queue.append(event)
 
@@ -196,7 +199,6 @@ class EventQueue:
             end_timestamp=None
         )
 
-        # Move to completed bursts
         self.completed_bursts.append(burst)
         del self.active_bursts[burst_id]
 
@@ -230,7 +232,6 @@ class EventQueue:
                 event_type = burst['event_type']
                 config = self.configs[event_type]
 
-                # Check if burst is stale (no activity within gap threshold)
                 queue = self.aggregations[event_type]
                 if queue:
                     last_event = queue[-1]
@@ -239,7 +240,6 @@ class EventQueue:
                     if time_since_last_event > config.gap_threshold:
                         burst_ids_to_end.append((burst_id, event_type, last_event.timestamp))
 
-            # End stale bursts
             for burst_id, event_type, end_time in burst_ids_to_end:
                 if burst_id in self.active_bursts:
                     self._end_burst(burst_id, end_time)
@@ -258,16 +258,13 @@ class EventQueue:
             ready_threshold = max_threshold + self.safety_margin
             current_time = time.time()
 
-            # Find bursts that are old enough to process
             bursts_to_process = []
             bursts_to_keep = deque()
 
             for i, burst in enumerate(self.completed_bursts):
-                # A burst is ready if there's a newer burst that's old enough
                 is_last = (i == len(self.completed_bursts) - 1)
 
                 if not is_last:
-                    # Check next burst
                     next_burst = list(self.completed_bursts)[i + 1]
                     time_since_next = current_time - next_burst['start_time']
 
@@ -276,10 +273,8 @@ class EventQueue:
                     else:
                         bursts_to_keep.append(burst)
                 else:
-                    # Keep the last burst in queue
                     bursts_to_keep.append(burst)
 
-            # Process ready bursts
             for burst in bursts_to_process:
                 self._emit_burst_requests(burst)
 
@@ -295,17 +290,14 @@ class EventQueue:
         start_req = burst['start_request']
         end_req = burst['end_request']
 
-        # Set end_timestamp on start request
         start_req.end_timestamp = end_req.timestamp
 
-        # Callback for start request
         if self._callback:
             try:
                 self._callback(start_req)
             except Exception as e:
                 print(f"Error in burst start callback: {e}")
 
-        # Callback for end request (end_timestamp points to next burst start or is None)
         if self._callback:
             try:
                 self._callback(end_req)
@@ -331,7 +323,6 @@ class EventQueue:
         Call this on ScreenRecorder.stop().
         """
         with self._lock:
-            # End all active bursts
             burst_ids_to_end = list(self.active_bursts.keys())
             current_time = time.time()
 
@@ -344,12 +335,10 @@ class EventQueue:
                 else:
                     self._end_burst(burst_id, current_time)
 
-            # Process all completed bursts
             while self.completed_bursts:
                 burst = self.completed_bursts.popleft()
                 self._emit_burst_requests(burst)
 
-            # Clear all aggregation queues
             for queue in self.aggregations.values():
                 queue.clear()
 

@@ -27,7 +27,7 @@ class InputEventHandler:
             if (monitor.x <= x < monitor.x + monitor.width and
                     monitor.y <= y < monitor.y + monitor.height):
                 return idx
-        return 0  # Default to primary monitor
+        return 0
 
     def on_move(self, x: int, y: int) -> None:
         """
@@ -44,7 +44,8 @@ class InputEventHandler:
             timestamp=timestamp,
             monitor_index=monitor_idx,
             event_type=EventType.MOUSE_MOVE,
-            details={'x': x, 'y': y}
+            details={'x': x, 'y': y},
+            cursor_position=(x, y)
         )
         self.event_queue.enqueue(event)
 
@@ -69,7 +70,8 @@ class InputEventHandler:
                 'x': x,
                 'y': y,
                 'button': str(button),
-            }
+            },
+            cursor_position=(x, y)
         )
         self.event_queue.enqueue(event)
 
@@ -95,7 +97,8 @@ class InputEventHandler:
                 'y': y,
                 'dx': dx,
                 'dy': dy
-            }
+            },
+            cursor_position=(x, y)
         )
         self.event_queue.enqueue(event)
 
@@ -107,6 +110,7 @@ class InputEventHandler:
             key: Key that was pressed
         """
         timestamp = time.time()
+        x, y = None, None
 
         try:
             controller = mouse.Controller()
@@ -125,7 +129,8 @@ class InputEventHandler:
             timestamp=timestamp,
             monitor_index=monitor_idx,
             event_type=EventType.KEY_PRESS,
-            details={'key': key_char}
+            details={'key': key_char},
+            cursor_position=(x, y)
         )
         self.event_queue.enqueue(event)
 
@@ -137,6 +142,7 @@ class InputEventHandler:
             key: Key that was released
         """
         timestamp = time.time()
+        x, y = None, None
 
         try:
             controller = mouse.Controller()
@@ -155,6 +161,7 @@ class InputEventHandler:
             timestamp=timestamp,
             monitor_index=monitor_idx,
             event_type=EventType.KEY_RELEASE,
-            details={'key': key_char}
+            details={'key': key_char},
+            cursor_position=(x, y)
         )
         self.event_queue.enqueue(event)

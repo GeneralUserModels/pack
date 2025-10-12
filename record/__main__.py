@@ -75,10 +75,7 @@ class ScreenRecorder:
             save_worker=self.save_worker,
         )
 
-        # Set callback to process single aggregation request
         self.input_event_queue.set_callback(self._on_aggregation_request)
-
-        # Set callback for new images (only used if buffer_all)
         self.image_queue.add_callback(self._on_new_image)
 
         self.input_handler = InputEventHandler(self.input_event_queue)
@@ -103,14 +100,19 @@ class ScreenRecorder:
         if not request:
             return
 
-        print(f"\nProcessing aggregation request: {request.reason}")
-
         processed = self.aggregation_worker.process_aggregation(request)
+        if self.processed_aggregations == 0:
+            print("-------------------------------------------------------------------")
+            print(">>>>                    Aggregation Summary                    <<<<")
+            print(f">>>> Session Directory: {str(self.session_dir.name):37s} <<<<")
+            print("-------------------------------------------------------------------")
+            print("Screenshot | Capture Reason | # Events | Screenshot Path")
+            print("-------------------------------------------------------------------")
 
         screenshot_status = "✓" if processed.screenshot else "✗"
-        path_info = f"-> {processed.screenshot_path.split('/')[-1]}" if processed.screenshot_path else ""
-        print(f"  {screenshot_status} {processed.request.reason:20s}"
-              f"| {len(processed.events)} events {path_info}")
+        path_info = f"{processed.screenshot_path.split('/')[-1]}" if processed.screenshot_path else ""
+        print(f"     {screenshot_status}     | {processed.request.reason:15s}"
+              f"| {str(len(processed.events)):8s} | {path_info}")
 
         self.processed_aggregations += 1
 
@@ -145,13 +147,9 @@ class ScreenRecorder:
         print("Input event aggregation: ENABLED (polling worker)")
         print(f"  - Save all images: {self.buffer_all}")
 
-        # Start input event queue polling worker
         self.input_event_queue.start()
-
-        # Start screenshot capture
         self.screenshot_manager.start()
 
-        # Start mouse listener
         self.mouse_listener = mouse.Listener(
             on_move=self.input_handler.on_move,
             on_click=self.input_handler.on_click,
@@ -159,7 +157,6 @@ class ScreenRecorder:
         )
         self.mouse_listener.start()
 
-        # Start keyboard listener
         self.keyboard_listener = keyboard.Listener(
             on_press=self.input_handler.on_press,
             on_release=self.input_handler.on_release
@@ -173,11 +170,10 @@ class ScreenRecorder:
         if not self.running:
             return
 
-        print("\n" + "=" * 41)
-        print(">>>>        Stopping Recorder        <<<<")
-        print("=" * 41 + "\n")
-
-        print(">>>> Cleaning up remaining processes ...\n")
+        print("-------------------------------------------------------------------")
+        print(">>>>                    Stopping Recorder                      <<<<")
+        print(">>>>             Cleaning Up Remaining Processes...            <<<<")
+        print("-------------------------------------------------------------------")
 
         self.running = False
 
@@ -187,20 +183,13 @@ class ScreenRecorder:
         if self.keyboard_listener:
             self.keyboard_listener.stop()
 
-        # Stop screenshot capture
         self.screenshot_manager.stop()
-
-        # Stop input event queue
         self.input_event_queue.stop()
 
-        # Process all remaining events and aggregations
-        print("Processing remaining events and aggregations...")
         self.input_event_queue.process_all_remaining()
 
-        # Give callback time to process
         time.sleep(0.5)
 
-        # Stop monitor if running
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=0.1)
 
@@ -239,7 +228,7 @@ def main():
     parser.add_argument(
         "-s", "--buffer-seconds",
         type=int,
-        default=12,
+        default=24,
         help="Number of seconds to keep in buffer (default: 12)"
     )
     parser.add_argument(

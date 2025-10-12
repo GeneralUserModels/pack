@@ -18,6 +18,7 @@ class InputEvent:
     monitor_index: int
     event_type: EventType
     details: Dict[str, Any]
+    cursor_position: tuple[int, int] | None
 
     def __lt__(self, other):
         return self.timestamp < other.timestamp
@@ -27,5 +28,6 @@ class InputEvent:
             'timestamp': self.timestamp,
             'monitor_index': self.monitor_index,
             'event_type': self.event_type.value,
-            'details': self.details
+            'details': self.details,
+            'cursor_position': self.cursor_position
         }
