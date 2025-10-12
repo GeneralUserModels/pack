@@ -10,14 +10,15 @@ from pynput import mouse, keyboard
 from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
-from record.monitor import RealtimeVisualizer
+from record.monitor import RealtimeVisualizer, plot_summary_stats
 from record.constants import Constants
 
 
 class ScreenRecorder:
 
     def __init__(
-        self, fps: int = 30,
+        self,
+        fps: int = 16,
         buffer_seconds: int = 12,
         buffer_all: bool = False,
         monitor: bool = False
@@ -39,7 +40,7 @@ class ScreenRecorder:
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v8_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v9_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")
@@ -195,10 +196,23 @@ class ScreenRecorder:
         print(f"Aggregations saved to: {self.aggregation_worker.aggregations_file}")
         print(f"Total aggregations processed: {self.processed_aggregations}")
 
-        # Validate that all events were processed
         all_valid = self.aggregation_worker.validate_events_processed()
         if all_valid:
             print("✓ All events were successfully captured in aggregations")
+        else:
+            print("✗ Some events were NOT captured in any aggregation")
+
+        time.sleep(1)
+        self._create_summary()
+
+    def _create_summary(self):
+        summary_path = self.session_dir / "summary.png"
+        print(f"\nSaving summary plot in {summary_path} ...")
+        agg_path = self.session_dir / "aggregations.jsonl"
+        events_path = self.session_dir / "events.jsonl"
+
+        if agg_path.exists() and events_path.exists():
+            plot_summary_stats(self.session_dir, agg_path, events_path, summary_path)
 
     def run(self):
         """Run the recorder until interrupted."""
@@ -231,7 +245,7 @@ def main():
     parser.add_argument(
         "-s", "--buffer-seconds",
         type=int,
-        default=24,
+        default=12,
         help="Number of seconds to keep in buffer (default: 24)"
     )
     parser.add_argument(

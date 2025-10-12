@@ -25,9 +25,9 @@ class InputEvent:
 
     def to_dict(self):
         return {
-            'timestamp': self.timestamp,
-            'monitor_index': self.monitor_index,
-            'event_type': self.event_type.value,
-            'details': self.details,
-            'cursor_position': self.cursor_position
+            "timestamp": self.timestamp,
+            "monitor_index": self.monitor_index,
+            "event_type": self.event_type.value,
+            "details": self.details,
+            "cursor_position": self.cursor_position
         }

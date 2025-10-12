@@ -5,18 +5,17 @@ from collections import deque, defaultdict
 from typing import Deque, Dict, List, Optional
 import warnings
 
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 from record.monitor.reader import TailReader
 
-MAX_EVENTS = 10000
-MAX_BURSTS = 500
+MAX_EVENTS = 5000
+MAX_BURSTS = 300
 EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}
-EVENT_COLOR = {'key': 'tab:purple', 'click': 'tab:red', 'move': 'tab:green', 'scroll': 'tab:orange'}
-MARKER_SIZE = 24
-EVENT_THROTTLE_MS = 75
+EVENT_COLOR = {'key': '#8B7FC7', 'click': '#FF6B6B', 'move': '#51CF66', 'scroll': '#FFD43B'}
+MARKER_SIZE = 32
+EVENT_THROTTLE_MS = 100
 
 warnings.filterwarnings(
     "ignore",
@@ -26,7 +25,7 @@ warnings.filterwarnings(
 
 
 class RealtimeVisualizer:
-    def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = 16, window_s: float = 30.0):
+    def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = 10, window_s: float = 30.0):
         self.events_reader = TailReader(events_path, from_start=True)
         self.aggr_reader = TailReader(aggr_path, from_start=True)
 
@@ -36,25 +35,29 @@ class RealtimeVisualizer:
         self.pending_starts: Dict[str, List[Dict]] = defaultdict(list)
 
         self.start_time: Optional[float] = None
-
         self.last_shown_time: Dict[str, float] = defaultdict(lambda: -float('inf'))
 
         self.window_s = window_s
         self.interval_ms = int(1000.0 / refresh_hz)
         self.throttle_s = EVENT_THROTTLE_MS / 1000.0
 
-        plt.rcParams["toolbar"] = "toolbar2"
-        self.fig, self.ax = plt.subplots(figsize=(12, 5))
-        self.fig.suptitle("Realtime Input Visualizer (events + aggregations)")
+        self._last_burst_count = 0
+        self._last_event_count = 0
+        self._cached_bursts = {}
+
+        self.fig, self.ax = plt.subplots(figsize=(14, 6))
+        self.fig.suptitle("Real-time Input Event Visualizer", fontsize=16, fontweight='bold')
+
         self.ax.set_yticks(list(EVENT_Y.values()))
-        self.ax.set_yticklabels(list(EVENT_Y.keys()))
+        self.ax.set_yticklabels(list(EVENT_Y.keys()), fontsize=11, fontweight='bold')
         self.ax.set_ylim(-0.5, max(EVENT_Y.values()) + 0.5)
-        self.ax.set_ylabel("Event Type")
-        self.ax.set_xlabel("Time (s) relative")
+        self.ax.set_ylabel("Event Type", fontsize=12, fontweight='bold')
+        self.ax.set_xlabel("Time (s) relative", fontsize=12, fontweight='bold')
+
+        self.ax.grid(True, axis='x', alpha=0.15, linestyle='--', linewidth=0.5)
 
         self.scatter = None
-
-        self.ax.grid(True, axis='x', alpha=0.25)
+        self._burst_patches = []
 
     @staticmethod
     def _coarse_from_type(et: Optional[str]) -> str:
@@ -131,11 +134,7 @@ class RealtimeVisualizer:
                 self.events.append(item)
 
     def _process_new_aggrs(self, lines: List[str]):
-        """
-        Aggregations are expected to have fields:
-          timestamp, event_type, is_start (bool)
-        We pair start/end into bursts
-        """
+        """Aggregations are expected to have fields: timestamp, event_type, is_start (bool)"""
         for line in lines:
             ag = self._parse_aggregation_line(line)
             if not ag:
@@ -199,36 +198,40 @@ class RealtimeVisualizer:
         window_start_rel = (now_ts - self.start_time) - self.window_s
         window_end_rel = (now_ts - self.start_time)
 
-        self.ax.cla()
+        self._last_event_count = len(self.events)
+        self._last_burst_count = len(self.bursts)
+
+        self.ax.clear()
         self.ax.set_yticks(list(EVENT_Y.values()))
-        self.ax.set_yticklabels(list(EVENT_Y.keys()))
+        self.ax.set_yticklabels(list(EVENT_Y.keys()), fontsize=11, fontweight='bold')
         self.ax.set_ylim(-0.5, max(EVENT_Y.values()) + 0.5)
-        self.ax.set_ylabel("Event Type")
-        self.ax.grid(True, axis='x', alpha=0.25)
+        self.ax.set_ylabel("Event Type", fontsize=12, fontweight='bold')
         self.ax.set_xlim(window_start_rel, window_end_rel + 0.0001)
-        self.ax.set_xlabel("Time (s) relative")
+        self.ax.set_xlabel("Time (s) relative", fontsize=12, fontweight='bold')
+        self.ax.grid(True, axis='x', alpha=0.15, linestyle='--', linewidth=0.5)
 
         bursts_shown = [b for b in list(self.bursts) if b["end_rel"] >= window_start_rel and b["start_rel"] <= window_end_rel]
         bursts_shown.sort(key=lambda x: x["start_rel"])
 
         if bursts_shown:
-            starts = np.array([max(b["start_rel"], window_start_rel) for b in bursts_shown])
-            ends = np.array([min(b["end_rel"], window_end_rel) for b in bursts_shown])
-            durations = ends - starts
-            for i, (s, d, b) in enumerate(zip(starts, durations, bursts_shown)):
+            for b in bursts_shown:
                 coarse = b["event_type"]
                 y = EVENT_Y.get(coarse, -1)
-                if y < -0.4:
-                    y = -0.75
-                col = EVENT_COLOR.get(coarse, "tab:gray")
-                self.ax.barh([y], [d], left=[s], height=0.6 * 0.8, align='center',
-                             color=col, alpha=0.22, edgecolor="black", linewidth=0.4, zorder=1)
+                col = EVENT_COLOR.get(coarse, "#444444")
+
+                s = max(b["start_rel"], window_start_rel)
+                e = min(b["end_rel"], window_end_rel)
+                d = e - s
+
+                self.ax.barh([y], [d], left=[s], height=0.65, align='center',
+                             color=col, alpha=0.25, edgecolor=col, linewidth=1.2, zorder=1)
 
         xs = []
         ys = []
         cs = []
         sizes = []
         alphas = []
+
         for e in list(self.events):
             rel = e["relative"]
             if rel < window_start_rel:
@@ -236,22 +239,36 @@ class RealtimeVisualizer:
             coarse = e["coarse"]
             xs.append(rel)
             ys.append(EVENT_Y.get(coarse, -1))
-            cs.append(EVENT_COLOR.get(coarse, "black"))
+            cs.append(EVENT_COLOR.get(coarse, "#999999"))
             age = window_end_rel - rel
-            alpha = max(0.12, 1.0 - (age / self.window_s))
+            alpha = max(0.3, 1.0 - (age / self.window_s) * 0.7)
             alphas.append(alpha)
             sizes.append(MARKER_SIZE)
 
-        for xi, yi, ci, si, ai in zip(xs, ys, cs, sizes, alphas):
-            self.ax.scatter([xi], [yi], s=si, color=ci, alpha=ai, edgecolors='none', zorder=3)
+        if xs:
+            for xi, yi, ci, si, ai in zip(xs, ys, cs, sizes, alphas):
+                self.ax.scatter([xi], [yi], s=si, color=ci, alpha=ai, edgecolors='white',
+                                linewidth=0.5, zorder=3)
 
-        self.ax.axvline(window_end_rel, color='k', linewidth=0.6, alpha=0.6, zorder=4)
+        self.ax.axvline(window_end_rel, color='white', linewidth=1.2, alpha=0.7, linestyle=':', zorder=4)
 
-        info = f"Window: {self.window_s}s | events: {len(self.events)} | bursts stored: {len(self.bursts)}"
-        self.fig.canvas.manager.set_window_title("Realtime Input Visualizer")
-        self.ax.text(0.995, 0.01, info, ha='right', va='bottom', transform=self.fig.transFigure, fontsize=16, alpha=0.7)
+        event_counts = {"click": 0, "move": 0, "scroll": 0, "key": 0}
+        for e in self.events:
+            c = e.get("coarse")
+            if c in event_counts:
+                event_counts[c] += 1
+
+        info = f"Events: {len(self.events)} | Bursts: {len(self.bursts)} | "
+        info += f"[C]{event_counts['click']} [M]{event_counts['move']} [K]{event_counts['key']} [S]{event_counts['scroll']}"
+
+        self.fig.canvas.manager.set_window_title("Real-time Input Visualizer")
+        self.ax.text(0.995, 0.02, info, ha='right', va='bottom', transform=self.fig.transFigure,
+                     fontsize=11, alpha=0.8, family='monospace')
 
     def run(self):
-        self.ani = animation.FuncAnimation(self.fig, self._draw, interval=self.interval_ms, blit=False, cache_frame_data=False)
+        self.ani = animation.FuncAnimation(
+            self.fig, self._draw, interval=self.interval_ms,
+            blit=False, cache_frame_data=False
+        )
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
         plt.show()

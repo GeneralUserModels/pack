@@ -1,13 +1,12 @@
+from collections import Counter
+import numpy as np
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 from pathlib import Path
-import argparse
 import json
 import sys
 import ast
 from datetime import datetime
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import numpy as np
-from collections import Counter
 
 INNER_TO_CATEGORY = {
     "mouse_down": "click",
@@ -23,14 +22,7 @@ DUPLICATES_CATEGORY = "duplicates"
 UNMATCHED_CATEGORY = "unmatched"
 ALL_PLOTTING_CATEGORIES = CATEGORIES + [DUPLICATES_CATEGORY, UNMATCHED_CATEGORY]
 
-CATEGORY_COLORS = {
-    "click": "#ffb3b3",
-    "move": "#b3d1ff",
-    "scroll": "#b3ffc9",
-    "key": "#f0e68c",
-    "duplicates": "#ffd7b3",
-    "unmatched": "#d3d3d3",
-}
+CATEGORY_COLORS = {'key': '#8B7FC7', 'click': '#FF6B6B', 'move': '#51CF66', 'scroll': '#FFD43B'}
 
 
 def ts_to_key(ts):
@@ -167,7 +159,7 @@ def collect_timestamps_from_events_file(objects):
     return sorted(ts_list)
 
 
-def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_path=None, show=True):
+def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_path=None):
     num_rows = len(ALL_PLOTTING_CATEGORIES)
     fig, axes = plt.subplots(nrows=num_rows, ncols=1, sharex=True, figsize=(14, 2.2 * num_rows), constrained_layout=True)
     if num_rows == 1:
@@ -217,7 +209,14 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_p
             for (s_ts, e_ts) in intervals_by_cat.get(cat, []):
                 s_dt = ts_to_dt(s_ts)
                 e_dt = ts_to_dt(e_ts)
-                ax.axvspan(s_dt, e_dt, alpha=0.25, color=CATEGORY_COLORS.get(cat, "#dddddd"), zorder=0)
+                ax.axvspan(
+                    s_dt, e_dt,
+                    facecolor=CATEGORY_COLORS.get(cat, "#dddddd"),
+                    edgecolor="black",
+                    alpha=0.25,
+                    linewidth=1.0,
+                    zorder=0
+                )
 
         ax.set_yticks([])
         ax.set_ylim(-1.0, 1.0)
@@ -228,33 +227,9 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_p
     if out_path:
         fig.savefig(out_path, dpi=200)
         print(f"Saved plot to: {out_path}")
-    if show:
-        plt.show()
-    plt.close(fig)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Plot aggregations.jsonl and mark duplicates/unmatched from events.jsonl.")
-    parser.add_argument("folder", type=Path, help="Folder that contains aggregations.jsonl and events.jsonl")
-    parser.add_argument("--out", "-o", type=Path, default=None, help="Optional output PNG file")
-    parser.add_argument("--no-show", action="store_true", help="Do not call plt.show() (useful for headless runs)")
-    args = parser.parse_args()
-
-    folder = args.folder
-    if not folder.exists() or not folder.is_dir():
-        print(f"Error: folder does not exist or is not a directory: {folder}", file=sys.stderr)
-        sys.exit(2)
-
-    agg_path = folder / "aggregations.jsonl"
-    events_path = folder / "events.jsonl"
-
-    if not agg_path.exists():
-        print(f"Error: aggregations.jsonl not found in {folder}", file=sys.stderr)
-        sys.exit(2)
-    if not events_path.exists():
-        print(f"Error: events.jsonl not found in {folder}", file=sys.stderr)
-        sys.exit(2)
-
+def plot_summary_stats(directory: Path, agg_path: Path, events_path: Path, summary_path: Path):
     agg_objs = read_jsonl(agg_path)
     events_objs = read_jsonl(events_path)
 
@@ -306,8 +281,8 @@ def main():
     plot_unmatched_ts = unmatched_sorted
 
     plot_all(events_by_cat, intervals_by_cat, plot_duplicates_ts, plot_unmatched_ts,
-             out_path=str(args.out) if args.out else None, show=not args.no_show)
+             out_path=summary_path)
 
 
 if __name__ == "__main__":
-    main()
+    plot_summary_stats()
