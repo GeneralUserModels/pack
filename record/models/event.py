@@ -16,6 +16,7 @@ class EventType(Enum):
 class InputEvent:
     timestamp: float
     monitor_index: int
+    monitor: dict
     event_type: EventType
     details: Dict[str, Any]
     cursor_position: tuple[int, int] | None
@@ -27,6 +28,7 @@ class InputEvent:
         return {
             "timestamp": self.timestamp,
             "monitor_index": self.monitor_index,
+            "monitor": self.monitor,
             "event_type": self.event_type.value,
             "details": self.details,
             "cursor_position": self.cursor_position

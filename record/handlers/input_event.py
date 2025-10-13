@@ -12,7 +12,7 @@ class InputEventHandler:
         self.event_queue = event_queue
         self._monitors = list(get_monitors())
 
-    def _get_monitor_index(self, x: int, y: int) -> int:
+    def _get_monitor(self, x: int, y: int) -> int:
         """
         Get the monitor index for given coordinates.
 
@@ -23,11 +23,16 @@ class InputEventHandler:
         Returns:
             Monitor index (0-based)
         """
+        def to_monitor_dict(monitor):
+            return {
+                "left": monitor.x, "top": monitor.y, "width": monitor.width, "height": monitor.height
+            }
+
         for idx, monitor in enumerate(self._monitors):
             if (monitor.x <= x < monitor.x + monitor.width and
                     monitor.y <= y < monitor.y + monitor.height):
-                return idx
-        return 0
+                return idx, to_monitor_dict(monitor)
+        return 0, to_monitor_dict(self._monitors[0])
 
     def on_move(self, x: int, y: int) -> None:
         """
@@ -38,11 +43,12 @@ class InputEventHandler:
             y: Y coordinate
         """
         timestamp = time.time()
-        monitor_idx = self._get_monitor_index(x, y)
+        monitor_idx, monitor = self._get_monitor(x, y)
 
         event = InputEvent(
             timestamp=timestamp,
             monitor_index=monitor_idx,
+            monitor=monitor,
             event_type=EventType.MOUSE_MOVE,
             details={'x': x, 'y': y},
             cursor_position=(x, y)
@@ -60,11 +66,12 @@ class InputEventHandler:
             pressed: True if pressed, False if released
         """
         timestamp = time.time()
-        monitor_idx = self._get_monitor_index(x, y)
+        monitor_idx, monitor = self._get_monitor(x, y)
 
         event = InputEvent(
             timestamp=timestamp,
             monitor_index=monitor_idx,
+            monitor=monitor,
             event_type=EventType.MOUSE_DOWN if pressed else EventType.MOUSE_UP,
             details={
                 'x': x,
@@ -86,11 +93,12 @@ class InputEventHandler:
             dy: Vertical scroll amount
         """
         timestamp = time.time()
-        monitor_idx = self._get_monitor_index(x, y)
+        monitor_idx, monitor = self._get_monitor(x, y)
 
         event = InputEvent(
             timestamp=timestamp,
             monitor_index=monitor_idx,
+            monitor=monitor,
             event_type=EventType.MOUSE_SCROLL,
             details={
                 'x': x,
@@ -112,13 +120,9 @@ class InputEventHandler:
         timestamp = time.time()
         x, y = None, None
 
-        try:
-            controller = mouse.Controller()
-            x, y = controller.position
-            monitor_idx = self._get_monitor_index(x, y)
-        except Exception as e:
-            print(f"Error getting mouse position: {e}")
-            monitor_idx = 0
+        controller = mouse.Controller()
+        x, y = controller.position
+        monitor_idx, monitor = self._get_monitor(x, y)
 
         try:
             key_char = key.char
@@ -128,6 +132,7 @@ class InputEventHandler:
         event = InputEvent(
             timestamp=timestamp,
             monitor_index=monitor_idx,
+            monitor=monitor,
             event_type=EventType.KEY_PRESS,
             details={'key': key_char},
             cursor_position=(x, y)
@@ -144,13 +149,9 @@ class InputEventHandler:
         timestamp = time.time()
         x, y = None, None
 
-        try:
-            controller = mouse.Controller()
-            x, y = controller.position
-            monitor_idx = self._get_monitor_index(x, y)
-        except Exception as e:
-            print(f"Error getting mouse position: {e}")
-            monitor_idx = 0
+        controller = mouse.Controller()
+        x, y = controller.position
+        monitor_idx, monitor = self._get_monitor(x, y)
 
         try:
             key_char = key.char
@@ -160,6 +161,7 @@ class InputEventHandler:
         event = InputEvent(
             timestamp=timestamp,
             monitor_index=monitor_idx,
+            monitor=monitor,
             event_type=EventType.KEY_RELEASE,
             details={'key': key_char},
             cursor_position=(x, y)
