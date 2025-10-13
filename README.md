@@ -22,6 +22,8 @@ uv run -m record
 
 ## Methodology
 
+<img width="845" height="270" alt="pack_overview" src="https://github.com/user-attachments/assets/5bab2b31-0564-448c-b286-de06859b7c97" />
+
 ### Recording
 
 The `record` module captures user interactions on the computer in the form of aggregated input events (click, move, scroll, key) and corresponding screenshots. To achieve this, the system employs the following approach:
