@@ -12,20 +12,41 @@ from pathlib import Path
 from typing import Iterable
 from dotenv import load_dotenv
 
-from label.clients import PromptClient, GeminiPromptClient, LocalQwenPromptClient
+from label.clients import PromptClient, GeminiPromptClient, Qwen3VLPromptClient
 from record.models import ProcessedAggregation, AggregationRequest
 
 load_dotenv()
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw
 except Exception:
     Image = None
+    ImageDraw = None
 
 try:
     import google.generativeai as genai
 except Exception:
     genai = None
+
+try:
+    from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+    from qwen_vl_utils import process_vision_info
+except Exception:
+    Qwen3VLForConditionalGeneration = None
+    AutoProcessor = None
+    process_vision_info = None
+
+
+# Constants for video annotation
+CLICK_MARKER_RADIUS = 8
+BUTTON_COLORS = {
+    'Button.left': 'red',
+    'left': 'red',
+    'Button.right': 'blue',
+    'right': 'blue',
+    'Button.middle': 'green',
+    'middle': 'green'
+}
 
 
 def list_screenshots(session_folder: Path) -> List[Path]:
@@ -73,11 +94,169 @@ def compute_max_image_size(images: Iterable[Path]) -> Tuple[int, int]:
     return (max_w, max_h)
 
 
-def create_video_from_images(images: List[Path], output_path: Path, fps: int = 1, pad_to: Optional[Tuple[int, int]] = None) -> None:
+def extract_mouse_events(events):
+    """Extract mouse click/press/release events."""
+    mouse_events = []
+    for event in events:
+        event_type = event.get('event_type', '')
+        details = event.get('details', {})
+        cursor_pos = event.get('cursor_pos', [])
+
+        if event_type in ['mouse_click', 'mouse_press', 'mouse_release']:
+            button = details.get('button', 'Button.left')
+            mouse_events.append({
+                'button': button,
+                'position': cursor_pos,
+                'event_type': event_type
+            })
+
+    return mouse_events
+
+
+def get_cursor_movements(events):
+    """Extract cursor movement from events."""
+    movements = []
+    prev_pos = None
+
+    for event in events:
+        cursor_pos = event.get('cursor_pos', [])
+        event_type = event.get('event_type', '')
+
+        if cursor_pos and len(cursor_pos) >= 2:
+            if prev_pos and prev_pos != cursor_pos:
+                movements.append({
+                    'start': prev_pos,
+                    'end': cursor_pos,
+                    'event_type': event_type
+                })
+            prev_pos = cursor_pos
+
+    return movements
+
+
+def screen_to_scaled_coords(screen_pos, monitor, scale, x_offset, y_offset):
+    """Convert screen coordinates to scaled image coordinates."""
+    x, y = screen_pos
+    img_x = x - monitor['left']
+    img_y = y - monitor['top']
+
+    scaled_x = int(img_x * scale) + x_offset
+    scaled_y = int(img_y * scale) + y_offset
+
+    return scaled_x, scaled_y
+
+
+def draw_cursor_arrow(img: Image.Image, start_pos, end_pos, monitor, color='orange', scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
+    """Draw a cursor movement arrow on the image."""
+    if Image is None or ImageDraw is None:
+        return img
+
+    import numpy as np
+    draw = ImageDraw.Draw(img)
+
+    start_x, start_y = screen_to_scaled_coords(start_pos, monitor, scale, x_offset, y_offset)
+    end_x, end_y = screen_to_scaled_coords(end_pos, monitor, scale, x_offset, y_offset)
+
+    if (start_x < 0 or start_y < 0 or start_x >= img.width or start_y >= img.height or
+            end_x < 0 or end_y < 0 or end_x >= img.width or end_y >= img.height):
+        return img
+
+    if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
+        return img
+
+    line_width = max(1, int(3 * scale))
+    draw.line([(start_x, start_y), (end_x, end_y)], fill=color, width=line_width)
+
+    arrow_length = int(15 * scale)
+    arrow_angle = 25
+
+    dx = end_x - start_x
+    dy = end_y - start_y
+    angle = np.arctan2(dy, dx)
+
+    arrow_angle_rad = np.radians(arrow_angle)
+    x1 = end_x - arrow_length * np.cos(angle - arrow_angle_rad)
+    y1 = end_y - arrow_length * np.sin(angle - arrow_angle_rad)
+    x2 = end_x - arrow_length * np.cos(angle + arrow_angle_rad)
+    y2 = end_y - arrow_length * np.sin(angle + arrow_angle_rad)
+
+    draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill=color, outline='darkorange')
+
+    marker_size = int(4 * scale)
+    draw.ellipse([(start_x - marker_size, start_y - marker_size), (start_x + marker_size, start_y + marker_size)],
+                 fill='lime', outline='darkgreen', width=2)
+
+    return img
+
+
+def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int, scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
+    """Draw click markers on the image."""
+    if Image is None or ImageDraw is None:
+        return img
+
+    draw = ImageDraw.Draw(img)
+    for click in click_positions:
+        button = click.get('button', 'Button.left')
+        position = click.get('position', click)
+
+        img_x, img_y = screen_to_scaled_coords(position, monitor, scale, x_offset, y_offset)
+
+        if img_x < 0 or img_y < 0 or img_x >= img.width or img_y >= img.height:
+            continue
+
+        color = BUTTON_COLORS.get(button, 'yellow')
+        scaled_radius = int(marker_radius * scale)
+
+        draw.ellipse(
+            [(img_x - scaled_radius, img_y - scaled_radius),
+             (img_x + scaled_radius, img_y + scaled_radius)],
+            fill=color, outline='black', width=2
+        )
+    return img
+
+
+def annotate_image(img: Image.Image, events, monitor, scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
+    """Annotate image with cursor movements and clicks."""
+    movements = get_cursor_movements(events)
+    for movement in movements:
+        img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor, 'orange', scale, x_offset, y_offset)
+
+    mouse_events = extract_mouse_events(events)
+    img = draw_clicks(img, mouse_events, monitor, CLICK_MARKER_RADIUS, scale, x_offset, y_offset)
+
+    return img
+
+
+def scale_and_pad_image(img, target_width, target_height, background_color=(0, 0, 0)):
+    """Scale and pad image to target dimensions."""
+    if Image is None:
+        return img, 1.0, 0, 0
+
+    original_width, original_height = img.size
+
+    scale_x = target_width / original_width
+    scale_y = target_height / original_height
+    scale = min(scale_x, scale_y)
+
+    new_width = int(original_width * scale)
+    new_height = int(original_height * scale)
+
+    scaled_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    result = Image.new('RGB', (target_width, target_height), background_color)
+
+    x_offset = (target_width - new_width) // 2
+    y_offset = (target_height - new_height) // 2
+
+    result.paste(scaled_img, (x_offset, y_offset))
+
+    return result, scale, x_offset, y_offset
+
+
+def create_video_from_images(images: List[Path], output_path: Path, fps: int = 1, pad_to: Optional[Tuple[int, int]] = None, label_video: bool = False, aggregations: Optional[List[ProcessedAggregation]] = None) -> None:
     """
-    Create a video from a list of images by copying them into a temporary folder as
-    000000.jpg, 000001.jpg, ... then calling ffmpeg with the %06d pattern.
-    Includes debug prints and a safety check to ensure files exist before ffmpeg runs.
+    Create a video from a list of images with optional annotation.
+    If label_video is True and aggregations provided, annotates each frame.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -91,10 +270,21 @@ def create_video_from_images(images: List[Path], output_path: Path, fps: int = 1
 
         for idx, src in enumerate(images):
             dst = tmpdir_path / f"{idx:06d}.jpg"
-            try:
+
+            if label_video and aggregations and idx < len(aggregations):
+                agg = aggregations[idx]
+                img = Image.open(src).convert('RGB')
+                if agg.request.screenshot_path and hasattr(agg.request, 'monitor'):
+                    monitor = getattr(agg.request, 'monitor', {'left': 0, 'top': 0})
+                    if pad_to:
+                        img, scale, x_offset, y_offset = scale_and_pad_image(img, pad_to[0], pad_to[1])
+                    else:
+                        scale, x_offset, y_offset = 1.0, 0, 0
+
+                    img = annotate_image(img, agg.events, monitor, scale, x_offset, y_offset)
+                img.save(dst)
+            else:
                 shutil.copy2(src, dst)
-            except Exception as e:
-                raise RuntimeError(f"Failed to copy {src} -> {dst}: {e}")
 
         expected_first = tmpdir_path / "000000.jpg"
         if not expected_first.exists():
@@ -184,7 +374,7 @@ def load_aggregations_jsonl(path: Path) -> List[ProcessedAggregation]:
             try:
                 line = json.loads(raw_line.strip())
             except Exception:
-                print(f"Skipping invalid json line: {line[:80]}")
+                print(f"Skipping invalid json line")
                 continue
 
             r = AggregationRequest(
@@ -229,14 +419,15 @@ def process_session(
     fps: int = 1,
     prompt_client: PromptClient = None,
     use_existing_video: Optional[Path] = None,
+    label_video: bool = False,
 ):
     """Main orchestration:
     - Reads screenshots from session_folder/screenshots
-    - Builds a full video (1 fps default) showing each screenshot for 1s
+    - Builds a full video showing each screenshot for 1s
     - Splits into chunks
     - Loads aggregations.jsonl and chunk them according to epoch time windows
-    - For each chunk: upload video chunk (if client supports it) and send prompt built from aggregations
-    - Save JSON results under out_chunks_dir
+    - For each chunk: upload video chunk and send prompt built from aggregations
+    - Save aggregations and generation results in separate files
     """
     screenshots = list_screenshots(session_folder)
     if not screenshots:
@@ -257,7 +448,8 @@ def process_session(
         master_video = use_existing_video
     else:
         print(f"Creating master video with {len(image_paths)} images; pad_to={pad_to}")
-        create_video_from_images(image_paths, master_video, fps=fps, pad_to=pad_to)
+        aggs = load_aggregations_jsonl(agg_jsonl)
+        create_video_from_images(image_paths, master_video, fps=fps, pad_to=pad_to, label_video=label_video, aggregations=aggs if label_video else None)
 
     chunks_dir = out_chunks_dir / "video_chunks"
     video_chunks = split_video(master_video, chunk_duration, chunks_dir)
@@ -273,13 +465,18 @@ def process_session(
         this_aggs = agg_chunks[i] if i < len(agg_chunks) else []
 
         prompts = []
-        for i, a in enumerate(this_aggs):
-            mss = f"{i // 60:02}:{i % 60:02}"
+        for j, a in enumerate(this_aggs):
+            mss = f"{j // 60:02}:{j % 60:02}"
             prompts.append(a.to_prompt(mss))
         full_prompt = "".join(prompts)
         with open(Path(__file__).parent / "prompt.txt", 'r') as f:
             prompt_template = f.read()
         full_prompt = prompt_template.replace("{{LOGS}}", full_prompt)
+
+        # Save aggregations separately
+        agg_output = chunk_out_dir / "aggregations.json"
+        with open(agg_output, 'w') as f:
+            json.dump([a.to_dict() for a in this_aggs], f, indent=2, ensure_ascii=False)
 
         file_descriptor = None
         if prompt_client is not None:
@@ -312,17 +509,29 @@ def process_session(
         else:
             print("No prompt client configured; skipping model call")
 
-        info = {
+        # Save generation result separately
+        result_output = chunk_out_dir / "generation_result.json"
+        with open(result_output, 'w') as f:
+            json.dump({
+                "chunk_index": i,
+                "video_chunk": str(vpath),
+                "aggregations_count": len(this_aggs),
+                "result": saved_resp,
+            }, f, indent=2, ensure_ascii=False)
+
+        # Save prompt for reference
+        prompt_output = chunk_out_dir / "prompt.txt"
+        with open(prompt_output, 'w') as f:
+            f.write(full_prompt)
+
+        results.append({
             "chunk_index": i,
             "video_chunk": str(vpath),
             "aggregations_count": len(this_aggs),
-            "aggregations": [a.to_dict() for a in this_aggs],
-            "prompt": full_prompt,
-            "result": saved_resp,
-        }
-        with open(chunk_out_dir / "result.json", 'w') as f:
-            json.dump(info, f, indent=2, ensure_ascii=False)
-        results.append(info)
+            "aggregations_file": str(agg_output),
+            "result_file": str(result_output),
+            "prompt_file": str(prompt_output),
+        })
 
     with open(out_chunks_dir / "all_chunks_summary.json", 'w') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
@@ -335,8 +544,10 @@ def parse_args():
     p.add_argument("--session", required=True, help="Path to session folder (contains screenshots/ and aggregations.jsonl)")
     p.add_argument("--agg-jsonl", default="aggregations.jsonl", help="Filename of aggregations jsonl inside session folder")
     p.add_argument("--chunk-duration", type=int, default=60, help="Chunk duration in seconds")
-    p.add_argument("--fps", type=int, default=1, help="Frames per second for master video (1 => 1s per screenshot)")
-    p.add_argument("--prompt-client", choices=["gemini", "local"], default="gemini")
+    p.add_argument("--fps", type=int, default=1, help="Frames per second for master video")
+    p.add_argument("--prompt-client", choices=["gemini", "qwen3vl", "local"], default="gemini")
+    p.add_argument("--qwen-model-path", default=None, help="Path to Qwen3-VL model (required for qwen3vl client)")
+    p.add_argument("--label-video", action="store_true", help="Annotate video frames with mouse movements and clicks")
     return p.parse_args()
 
 
@@ -352,10 +563,14 @@ def main():
         if api_key is None:
             raise RuntimeError('GEMINI_API_KEY environment variable not set (required for Gemini client)')
         client = GeminiPromptClient(api_key=api_key)
+    elif args.prompt_client == 'qwen3vl':
+        if args.qwen_model_path is None:
+            raise RuntimeError('--qwen-model-path required for qwen3vl client')
+        client = Qwen3VLPromptClient(model_path=args.qwen_model_path)
     else:
-        client = LocalQwenPromptClient()
+        raise RuntimeError(f"Unsupported prompt client: {args.prompt_client}")
 
-    process_session(session, agg_path, out, chunk_duration=args.chunk_duration, fps=args.fps, prompt_client=client)
+    process_session(session, agg_path, out, chunk_duration=args.chunk_duration, fps=args.fps, prompt_client=client, label_video=args.label_video)
 
 
 if __name__ == '__main__':
