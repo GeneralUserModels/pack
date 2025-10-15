@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Iterable
 from dotenv import load_dotenv
 
-from label.clients import PromptClient, GeminiPromptClient, Qwen3VLPromptClient
+from label.clients import PromptClient, GeminiPromptClient
+from label.clients.qwen_3_vl_client import Qwen3VLPromptClient
+from label.vllm_server_manager import VLLMServerManager
 from record.models import ProcessedAggregation, AggregationRequest
 
 load_dotenv()
@@ -22,19 +24,6 @@ try:
 except Exception:
     Image = None
     ImageDraw = None
-
-try:
-    import google.generativeai as genai
-except Exception:
-    genai = None
-
-try:
-    from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
-    from qwen_vl_utils import process_vision_info
-except Exception:
-    Qwen3VLForConditionalGeneration = None
-    AutoProcessor = None
-    process_vision_info = None
 
 
 # Constants for video annotation
@@ -540,14 +529,24 @@ def process_session(
 
 
 def parse_args():
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description="Process session recordings with VLM labeling")
     p.add_argument("--session", required=True, help="Path to session folder (contains screenshots/ and aggregations.jsonl)")
     p.add_argument("--agg-jsonl", default="aggregations.jsonl", help="Filename of aggregations jsonl inside session folder")
     p.add_argument("--chunk-duration", type=int, default=60, help="Chunk duration in seconds")
     p.add_argument("--fps", type=int, default=1, help="Frames per second for master video")
-    p.add_argument("--prompt-client", choices=["gemini", "qwen3vl", "local"], default="gemini")
-    p.add_argument("--qwen-model-path", default=None, help="Path to Qwen3-VL model (required for qwen3vl client)")
+    p.add_argument("--prompt-client", choices=["gemini", "qwen3vl"], default="gemini", help="Which VLM client to use")
+
+    # Qwen3VL options
+    p.add_argument("--qwen-model-path", default="Qwen/Qwen3-VL-30B-A3B-Thinking-FP8", help="Qwen model path or HuggingFace ID")
+    p.add_argument("--vllm-port", type=int, default=8000, help="Port for vLLM server")
+    p.add_argument("--tensor-parallel-size", type=int, default=1, help="Number of GPUs for tensor parallelism")
+    p.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="GPU memory utilization (0.0-1.0)")
+    p.add_argument("--max-model-len", type=int, default=None, help="Maximum model context length")
+    p.add_argument("--server-startup-timeout", type=int, default=600, help="Timeout for vLLM server startup (seconds)")
+
+    # Video options
     p.add_argument("--label-video", action="store_true", help="Annotate video frames with mouse movements and clicks")
+
     return p.parse_args()
 
 
@@ -562,15 +561,50 @@ def main():
         api_key = os.environ.get('GEMINI_API_KEY')
         if api_key is None:
             raise RuntimeError('GEMINI_API_KEY environment variable not set (required for Gemini client)')
-        client = GeminiPromptClient(api_key=api_key)
-    elif args.prompt_client == 'qwen3vl':
-        if args.qwen_model_path is None:
-            raise RuntimeError('--qwen-model-path required for qwen3vl client')
-        client = Qwen3VLPromptClient(model_path=args.qwen_model_path)
-    else:
-        raise RuntimeError(f"Unsupported prompt client: {args.prompt_client}")
 
-    process_session(session, agg_path, out, chunk_duration=args.chunk_duration, fps=args.fps, prompt_client=client, label_video=args.label_video)
+        print("[Main] Using Gemini client")
+        client = GeminiPromptClient(api_key=api_key)
+        process_session(
+            session, agg_path, out,
+            chunk_duration=args.chunk_duration,
+            fps=args.fps,
+            prompt_client=client,
+            label_video=args.label_video
+        )
+
+    elif args.prompt_client == 'qwen3vl':
+        print("[Main] Using Qwen3-VL client with managed vLLM server")
+
+        # Start managed vLLM server
+        with VLLMServerManager(
+            model_path=args.qwen_model_path,
+            port=args.vllm_port,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            max_model_len=args.max_model_len,
+        ) as server:
+            # Wait for server with custom timeout
+            server._wait_for_server(timeout=args.server_startup_timeout)
+
+            # Create client pointing to the managed server
+            client = Qwen3VLPromptClient(
+                base_url=server.get_base_url(),
+                model_name=args.qwen_model_path,
+            )
+
+            # Process the session
+            process_session(
+                session, agg_path, out,
+                chunk_duration=args.chunk_duration,
+                fps=args.fps,
+                prompt_client=client,
+                label_video=args.label_video
+            )
+
+        print("[Main] vLLM server stopped automatically")
+
+    else:
+        raise ValueError(f"Unknown prompt client: {args.prompt_client}")
 
 
 if __name__ == '__main__':

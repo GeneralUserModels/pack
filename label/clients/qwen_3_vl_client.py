@@ -1,175 +1,246 @@
 from __future__ import annotations
 from pathlib import Path
 import json
-from typing import Any, Dict, Optional
+import base64
+from typing import Any, Dict, Optional, List, Union
 
-from label.clients.prompt_client import PromptClient
+from label.clients.prompt_client import PromptClient, TASK_SCHEMA
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 
 class Qwen3VLPromptClient(PromptClient):
-    """Qwen3-VL client for video and image processing."""
+    """Qwen3-VL client using vLLM's OpenAI-compatible API for structured output."""
 
-    def __init__(self, model_path: str, device_map: str = "auto", dtype: str = "auto"):
-        """
-        Initialize Qwen3-VL client.
-
-        Args:
-            model_path: Path to the Qwen3-VL model
-            device_map: Device mapping (default: "auto")
-            dtype: Data type for model (default: "auto")
-        """
-        try:
-            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
-            from qwen_vl_utils import process_vision_info
-        except ImportError:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000/v1",
+        api_key: str = "EMPTY",
+        model_name: str = "Qwen/Qwen3-VL-30B-A3B-Thinking-FP8",
+        max_tokens: int = 4096,
+    ):
+        if OpenAI is None:
             raise RuntimeError(
-                "Required packages not installed. Install with:\n"
-                "pip install transformers qwen-vl-utils torch"
+                "OpenAI package not installed. Install with:\n"
+                "pip install openai"
             )
 
-        self.model_path = model_path
-        self.device_map = device_map
-        self.dtype = dtype
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.max_tokens = max_tokens
 
-        print(f"[Qwen3VL] Loading model from {model_path}...")
-        self.processor = AutoProcessor.from_pretrained(model_path)
-        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-            model_path,
-            dtype=dtype,
-            device_map=device_map
+        print(f"[Qwen3VL-OpenAI] Connecting to {base_url}")
+        print(f"[Qwen3VL-OpenAI] Model: {model_name}")
+
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
         )
-        self.process_vision_info = process_vision_info
-        print("[Qwen3VL] Model loaded successfully")
 
     def upload_file(self, path: str) -> Any:
         """
-        For Qwen3-VL, we return the file path as the descriptor.
-        The actual processing happens in generate_content.
+        Register a file and return its descriptor.
+        For OpenAI API, we'll encode the file as base64.
         """
         p = Path(path)
         if not p.exists():
             raise RuntimeError(f"File not found: {path}")
 
         file_type = "video" if p.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv"} else "image"
-        print(f"[Qwen3VL] File registered: {path} (type: {file_type})")
+        print(f"[Qwen3VL-OpenAI] File registered: {path} (type: {file_type})")
 
         return {
             "path": str(p.absolute()),
             "type": file_type
         }
 
-    def generate_content(
-        self,
-        prompt: str,
-        file_descriptor: Optional[Any] = None,
-        *,
-        response_mime_type: str = "application/json",
-        schema: Optional[Dict] = None
-    ) -> Any:
-        """
-        Generate content using Qwen3-VL model.
+    def _encode_file_to_base64_url(self, file_path: str, file_type: str) -> str:
+        """Encode file to base64 data URL."""
+        with open(file_path, "rb") as f:
+            b64_data = base64.b64encode(f.read()).decode("utf-8")
 
-        Args:
-            prompt: The text prompt
-            file_descriptor: Dict with "path" and "type" keys
-            response_mime_type: Expected response format (currently ignored, always generates JSON)
-            schema: Optional schema (currently ignored)
+        if file_type == "video":
+            mime_type = "video/mp4"
+        else:
+            mime_type = "image/jpeg"
 
-        Returns:
-            Response object with text attribute containing the model output
-        """
-        messages = [
+        return f"data:{mime_type};base64,{b64_data}"
+
+    def _build_messages(self, prompt: str, file_descriptor: Optional[Dict]) -> List[Dict]:
+        """Build messages in OpenAI chat format with optional media."""
+        if not file_descriptor:
+            return [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+
+        file_path = file_descriptor.get("path")
+        file_type = file_descriptor.get("type", "image")
+
+        # Encode file as base64 data URL
+        try:
+            data_url = self._encode_file_to_base64_url(file_path, file_type)
+            print(f"[Qwen3VL-OpenAI] Encoded {file_type} file ({len(data_url)} bytes)")
+        except Exception as e:
+            print(f"[Qwen3VL-OpenAI] Warning: Failed to encode file: {e}")
+            # Fall back to text-only
+            return [{"role": "user", "content": prompt}]
+
+        # Build message with media content
+        if file_type == "video":
+            content = [
+                {
+                    "type": "video_url",
+                    "video_url": {"url": data_url}
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        else:
+            content = [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+
+        return [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt}
-                ]
+                "content": content
             }
         ]
 
-        # Add video or image if provided
-        if file_descriptor:
-            file_path = file_descriptor.get("path")
-            file_type = file_descriptor.get("type", "image")
+    def generate_content(
+        self,
+        prompt: Union[str, List[str]],
+        file_descriptor: Optional[Union[Dict, List[Dict]]] = None,
+        *,
+        response_mime_type: str = "application/json",
+        schema: Optional[Dict] = None,
+    ) -> Union[Qwen3VLOpenAIResponse, List[Qwen3VLOpenAIResponse]]:
+        if schema is None:
+            schema = TASK_SCHEMA
 
-            if file_type == "video":
-                messages[0]["content"].append({
-                    "type": "video",
-                    "video": f"file://{file_path}"
-                })
-            else:
-                messages[0]["content"].append({
-                    "type": "image",
-                    "image": f"file://{file_path}"
-                })
+        is_batch = isinstance(prompt, list)
 
-        print(f"[Qwen3VL] Processing {'video' if file_descriptor and file_descriptor.get('type') == 'video' else 'text'} prompt...")
+        if is_batch:
+            return self._generate_content_batch(
+                prompt, file_descriptor, response_mime_type, schema
+            )
+        else:
+            return self._generate_content_single(
+                prompt, file_descriptor, response_mime_type, schema
+            )
+
+    def _generate_content_single(
+        self,
+        prompt: str,
+        file_descriptor: Optional[Dict] = None,
+        response_mime_type: str = "application/json",
+        schema: Optional[Dict] = None,
+    ) -> Qwen3VLOpenAIResponse:
+        """Process a single prompt with optional file."""
+        messages = self._build_messages(prompt, file_descriptor)
+
+        print(f"[Qwen3VL-OpenAI] Processing {'video/image' if file_descriptor else 'text'} prompt...")
 
         try:
-            # Apply chat template
-            text = self.processor.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
+            # Build request parameters
+            request_params = {
+                "model": self.model_name,
+                "messages": messages,
+                "temperature": 0.0,
+                "max_tokens": self.max_tokens,
+            }
+
+            # Add structured output constraint if schema provided
+            if schema:
+                request_params["extra_body"] = {"guided_json": schema}
+                print("[Qwen3VL-OpenAI] Using guided JSON output")
+
+            # Generate
+            print("[Qwen3VL-OpenAI] Generating response...")
+            completion = self.client.chat.completions.create(**request_params)
+
+            # Extract response
+            content = completion.choices[0].message.content
+
+            print("[Qwen3VL-OpenAI] Response generated successfully")
+
+            return Qwen3VLOpenAIResponse(
+                text=content,
+                completion=completion,
+                schema=schema,
             )
-
-            # Process vision information
-            images, videos, video_kwargs = self.process_vision_info(
-                messages,
-                image_patch_size=16,
-                return_video_kwargs=True,
-                return_video_metadata=True
-            )
-
-            video_metadatas = None
-            if videos is not None:
-                videos, video_metadatas = zip(*videos)
-                videos, video_metadatas = list(videos), list(video_metadatas)
-
-            # Prepare inputs
-            inputs = self.processor(
-                text=text,
-                images=images,
-                videos=videos,
-                video_metadata=video_metadatas,
-                return_tensors="pt",
-                do_resize=False,
-                **video_kwargs
-            )
-            inputs = inputs.to(self.model.device)
-
-            # Generate content
-            print("[Qwen3VL] Generating response...")
-            generated_ids = self.model.generate(**inputs, max_new_tokens=4096)
-
-            # Decode response
-            generated_text = self.processor.batch_decode(
-                generated_ids,
-                skip_special_tokens=True
-            )[0]
-
-            print("[Qwen3VL] Response generated successfully")
-
-            # Try to extract JSON from response
-            response_obj = Qwen3VLResponse(generated_text)
-            return response_obj
 
         except Exception as e:
-            print(f"[Qwen3VL] Error during generation: {e}")
+            print(f"[Qwen3VL-OpenAI] Error during generation: {e}")
             raise
 
+    def _generate_content_batch(
+        self,
+        prompts: List[str],
+        file_descriptors: Optional[List[Dict]] = None,
+        response_mime_type: str = "application/json",
+        schema: Optional[Dict] = None,
+    ) -> List[Qwen3VLOpenAIResponse]:
+        """Process multiple prompts sequentially (OpenAI API doesn't support true batching)."""
+        if file_descriptors is None:
+            file_descriptors = [None] * len(prompts)
 
-class Qwen3VLResponse:
-    """Wrapper for Qwen3-VL response."""
+        if len(prompts) != len(file_descriptors):
+            raise ValueError("prompts and file_descriptors must have the same length")
 
-    def __init__(self, text: str):
+        all_responses = []
+        total_samples = len(prompts)
+
+        print(f"[Qwen3VL-OpenAI] Processing {total_samples} samples sequentially...")
+
+        for i, (prompt, file_desc) in enumerate(zip(prompts, file_descriptors)):
+            print(f"[Qwen3VL-OpenAI] Sample {i + 1}/{total_samples}...")
+
+            try:
+                response = self._generate_content_single(
+                    prompt, file_desc, response_mime_type, schema
+                )
+                all_responses.append(response)
+                print(f"[Qwen3VL-OpenAI] Sample {i + 1} completed successfully")
+            except Exception as e:
+                print(f"[Qwen3VL-OpenAI] Error on sample {i + 1}: {e}")
+                raise
+
+        print(f"[Qwen3VL-OpenAI] All {total_samples} samples processed successfully")
+        return all_responses
+
+
+class Qwen3VLOpenAIResponse:
+    """Wrapper for Qwen3-VL OpenAI API response with structured output support."""
+
+    def __init__(self, text: str, completion: Any, schema: Optional[Dict] = None):
         """
         Initialize response wrapper.
 
         Args:
-            text: The raw text response from the model
+            text: The generated text response
+            completion: The OpenAI completion object
+            schema: JSON schema used for generation
         """
         self.text = text
+        self.completion = completion
+        self.schema = schema
         self._json = None
         self._parse_json()
 
@@ -181,7 +252,7 @@ class Qwen3VLResponse:
         except json.JSONDecodeError:
             # Try to find JSON within the text
             import re
-            json_match = re.search(r'\{.*\}', self.text, re.DOTALL)
+            json_match = re.search(r'\{.*\}|\[.*\]', self.text, re.DOTALL)
             if json_match:
                 try:
                     self._json = json.loads(json_match.group())
@@ -196,3 +267,29 @@ class Qwen3VLResponse:
         if self._json is not None:
             return self._json
         return self.text
+
+    @property
+    def token_ids(self) -> List[int]:
+        """Return empty list (token IDs not available via OpenAI API)."""
+        return []
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert response to dictionary for saving.
+
+        Returns:
+            Dictionary with json, usage stats, and raw text
+        """
+        usage = {}
+        if hasattr(self.completion, "usage") and self.completion.usage:
+            usage = {
+                "prompt_tokens": self.completion.usage.prompt_tokens,
+                "completion_tokens": self.completion.usage.completion_tokens,
+                "total_tokens": self.completion.usage.total_tokens,
+            }
+
+        return {
+            "json": self.json,
+            "usage": usage,
+            "raw_text": self.text,
+        }
