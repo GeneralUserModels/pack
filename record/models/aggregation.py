@@ -18,6 +18,8 @@ class AggregationRequest:
     is_start: bool  # True for start, False for end
     screenshot: Optional[Any] = None  # Screenshot object from ImageQueue
     screenshot_path: Optional[str] = None  # Path to saved screenshot
+    screenshot_timestamp: Optional[float] = None  # Timestamp of the screenshot
+    end_screenshot_timestamp: Optional[float] = None  # Timestamp of end screenshot
     monitor: Optional[dict] = None  # Monitor info at the time of screenshot
     burst_id: Optional[int] = None  # ID of the burst this request belongs to
 

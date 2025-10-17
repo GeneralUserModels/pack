@@ -53,7 +53,7 @@ class ImageQueue:
             List of items within the time window
         """
         with self._lock:
-            candidates = [item for item in self._queue if item.timestamp <= timestamp]
+            candidates = [item for item in self._queue if item.timestamp <= timestamp - milliseconds / 1000.0]
             return candidates if candidates else None
 
     def get_entries_after(self, timestamp: float, milliseconds: int) -> List[Any]:
@@ -68,7 +68,7 @@ class ImageQueue:
             List of items within the time window
         """
         with self._lock:
-            candidates = [item for item in self._queue if item.timestamp >= timestamp]
+            candidates = [item for item in self._queue if item.timestamp >= timestamp + milliseconds / 1000.0]
             return candidates if candidates else None
 
     def get_latest(self) -> Optional[Any]:

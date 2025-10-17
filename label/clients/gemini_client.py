@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-import google.generativeai as genai
+from google import genai
 from typing import Any, Dict, Optional
 
 from label.clients.prompt_client import PromptClient
@@ -14,19 +14,17 @@ class GeminiPromptClient(PromptClient):
             api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY not provided via constructor or environment")
-        genai.configure(api_key=api_key)
+        self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
-        self._model = genai.GenerativeModel(model_name)
 
     def upload_file(self, path: str) -> Any:
         print(f"[Gemini] Uploading file: {path}")
-        video_file = genai.upload_file(path=str(path))
+        video_file = self.client.files.upload(file=path)
         printed = False
         while getattr(video_file, "state", None) and getattr(video_file.state, "name", None) == "PROCESSING":
             if not printed:
                 print("[Gemini] File is processing...")
                 printed = True
-            video_file = genai.get_file(video_file.name)
         if getattr(video_file, "state", None) and getattr(video_file.state, "name", None) == "FAILED":
             raise RuntimeError("Gemini failed processing the file")
         print(f"[Gemini] Upload finished: uri={getattr(video_file, 'uri', getattr(video_file, 'name', str(path)))}")
@@ -48,5 +46,5 @@ class GeminiPromptClient(PromptClient):
             temperature=0.0,
             response_schema=schema
         )
-        res = self._model.generate_content(inputs, generation_config=generation_config)
+        res = self.client.models.generate_content(model=self.model_name, contents=inputs, generation_config=generation_config)
         return res
