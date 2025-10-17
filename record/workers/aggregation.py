@@ -118,7 +118,10 @@ class AggregationWorker:
                 'screenshot_timestamp': aggregation.request.screenshot.timestamp if aggregation.request.screenshot else None,
                 'num_events': len(aggregation.events),
                 'events': aggregation.events,
-                'cursor_position': aggregation.events[0].get('cursor_position') if aggregation.events else None
+                'cursor_position': aggregation.events[0].get('cursor_position') if aggregation.events else None,
+                'monitor': aggregation.request.monitor,
+                'burst_id': aggregation.request.burst_id
+
             }
 
             with open(self.aggregations_file, 'a') as f:

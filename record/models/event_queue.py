@@ -113,24 +113,27 @@ class EventQueue:
             last_event, last_screenshot = queue[-1]
             first_event, first_screenshot = queue[0]
 
+            # Check if monitor changed - force new burst if so
+            monitor_changed = event.monitor_index != last_event.monitor_index
+
             gap_diff = event.timestamp - last_event.timestamp
             total_diff = event.timestamp - first_event.timestamp
 
             gap_ok = gap_diff <= config.gap_threshold
             total_ok = total_diff <= config.total_threshold
 
-            # Case 2: Gap threshold exceeded, end current burst and start new one
-            if not gap_ok:
+            # Case 2: Monitor changed or gap threshold exceeded, end current burst and start new one
+            if monitor_changed or not gap_ok:
                 burst_id = self._find_burst_by_type(agg_type)
                 if burst_id is not None:
-                    self._end_burst(burst_id, last_event.timestamp, last_screenshot)
+                    self._end_burst(burst_id, last_event.timestamp, last_screenshot, last_event)
 
                 screenshot = self._find_screenshot_before(event.timestamp)
                 burst_id = self._start_burst(agg_type, event, screenshot)
                 queue.clear()
                 queue.append((event, screenshot))
 
-            # Case 3: Total threshold exceeded (but gap OK), split the burst
+            # Case 3: Total threshold exceeded (but gap OK and monitor same), split the burst
             elif not total_ok:
                 queue_list = list(queue)
                 mid_timestamp = (first_event.timestamp + last_event.timestamp) / 2
@@ -140,7 +143,7 @@ class EventQueue:
 
                 burst_id = self._find_burst_by_type(agg_type)
                 if burst_id is not None and first_half:
-                    self._end_burst(burst_id, first_half[-1][0].timestamp, first_half[-1][1])
+                    self._end_burst(burst_id, first_half[-1][0].timestamp, first_half[-1][1], first_half[-1][0])
 
                 if second_half:
                     updated_second_half = []
@@ -163,7 +166,7 @@ class EventQueue:
                     queue.clear()
                     queue.append((event, screenshot))
 
-            # Case 4: Within thresholds, just add to current burst
+            # Case 4: Within thresholds and same monitor, just add to current burst
             else:
                 screenshot = self._find_screenshot_before(event.timestamp)
                 queue.append((event, screenshot))
@@ -196,14 +199,16 @@ class EventQueue:
                 event_type=event_type,
                 is_start=True,
                 screenshot=screenshot,
-                screenshot_path=None
+                screenshot_path=None,
+                monitor=event.monitor,
+                burst_id=burst_id
             ),
             'end_request': None
         }
 
         return burst_id
 
-    def _end_burst(self, burst_id: int, end_time: float, screenshot: Optional[Any]) -> None:
+    def _end_burst(self, burst_id: int, end_time: float, screenshot: Optional[Any], last_event: InputEvent) -> None:
         """
         End a burst and move it to completed queue.
 
@@ -211,6 +216,7 @@ class EventQueue:
             burst_id: ID of the burst to end
             end_time: Timestamp when the burst ended
             screenshot: Cached screenshot for the end event
+            last_event: The last event in the burst (for monitor info)
         """
         if burst_id not in self.active_bursts:
             return
@@ -225,7 +231,9 @@ class EventQueue:
             event_type=burst['event_type'],
             is_start=False,
             screenshot=screenshot,
-            screenshot_path=None
+            screenshot_path=None,
+            monitor=last_event.monitor,
+            burst_id=burst_id
         )
 
         self.completed_bursts.append(burst)
@@ -297,11 +305,11 @@ class EventQueue:
                     time_since_last_event = current_time - last_event.timestamp
 
                     if time_since_last_event > config.gap_threshold:
-                        burst_ids_to_end.append((burst_id, event_type, last_event.timestamp, last_screenshot))
+                        burst_ids_to_end.append((burst_id, event_type, last_event.timestamp, last_screenshot, last_event))
 
-            for burst_id, event_type, end_time, screenshot in burst_ids_to_end:
+            for burst_id, event_type, end_time, screenshot, last_event in burst_ids_to_end:
                 if burst_id in self.active_bursts:
-                    self._end_burst(burst_id, end_time, screenshot)
+                    self._end_burst(burst_id, end_time, screenshot, last_event)
                     self.aggregations[event_type].clear()
 
     def _process_ready_bursts(self) -> None:
@@ -393,9 +401,9 @@ class EventQueue:
                 queue = self.aggregations[burst['event_type']]
                 if queue:
                     last_event, last_screenshot = queue[-1]
-                    self._end_burst(burst_id, last_event.timestamp, last_screenshot)
+                    self._end_burst(burst_id, last_event.timestamp, last_screenshot, last_event)
                 else:
-                    self._end_burst(burst_id, current_time, None)
+                    self._end_burst(burst_id, current_time, None, None)
 
             while self.completed_bursts:
                 burst = self.completed_bursts.popleft()
