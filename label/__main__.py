@@ -266,13 +266,12 @@ def main():
         api_key = os.environ.get('GEMINI_API_KEY')
         if api_key is None:
             raise RuntimeError('GEMINI_API_KEY environment variable not set (required for Gemini client)')
+    client = None
+
+    if args.prompt_client == 'gemini':
         client = GeminiPromptClient(api_key=api_key)
     elif args.prompt_client == 'qwen3vl':
-        if args.qwen_model_path is None:
-            raise RuntimeError('--qwen-model-path required for qwen3vl client')
         client = Qwen3VLPromptClient(model_path=args.qwen_model_path)
-    else:
-        raise RuntimeError(f"Unsupported prompt client: {args.prompt_client}")
 
     process_session(
         session,
