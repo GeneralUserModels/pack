@@ -106,7 +106,7 @@ Below are the flags for each command (concise, non-code descriptions).
 * `--gpu-memory-utilization` — fraction of GPU memory to reserve for the server. **Default:** `0.9`
 * `--max-model-len` — max token length for the model.
 * `--server-startup-timeout` — seconds to wait for server startup. **Default:** `600`
-* `--moe-expert-parallel` — enable MoE expert-parallel mode (flag).
+* `--enable-expert-parallel` — enable MoE expert-parallel mode (flag).
 
 ---
 
@@ -150,10 +150,9 @@ Launch a Qwen vLLM instance automatically (example):
 uv run -m label \
   --session logs/session_xyz \
   --client qwen3vl \
-  --model-id Qwen/Qwen3-VL-30B-A3B-Thinking-FP8 \
+  --model-id Qwen/Qwen3-VL-8B-Thinking-FP8 \
   --label-video \
-  --tensor-parallel-size 8 \
-  --enable-expert-parallel
+  --tensor-parallel-size 4
 ```
 
 Use an existing vLLM server:

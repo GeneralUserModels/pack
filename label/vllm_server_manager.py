@@ -50,7 +50,7 @@ class VLLMServerManager:
         ]
 
         if self.moe_expert_parallel:
-            cmd.append("--moe-expert-parallel")
+            cmd.append("--enable-expert-parallel")
 
         if self.max_model_len is not None:
             cmd.extend(["--max-model-len", str(self.max_model_len)])
