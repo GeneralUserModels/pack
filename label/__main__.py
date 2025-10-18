@@ -183,9 +183,10 @@ def parse_args():
 
     # Qwen3VL options
     p.add_argument(
-        "--qwen-model-path",
-        default="Qwen/Qwen3-VL-8B-Thinking-FP8",
-        help="Qwen model path or HuggingFace ID"
+        "--model-id",
+        default="",
+        help="Qwen or gemini model path or HuggingFace ID. Default (Qwen/Qwen3-VL-8B-Thinking-FP8)"
+        " if qwen3vl client is used or (gemini-2.5-flash) if gemini is client."
     )
     p.add_argument(
         "--vllm-port",
@@ -231,17 +232,19 @@ def parse_args():
         help="Annotate video frames with mouse movements and clicks (standard mode only)"
     )
 
-    return p.parse_args()
+    args = p.parse_args()
+    if args.prompt_client == 'gemini' and not args.model_id:
+        args.model_id = 'gemini-2.5-flash'
+    if args.prompt_client == 'qwen3vl' and not args.model_id:
+        args.model_id = 'Qwen/Qwen3-VL-8B-Thinking-FP8'
+    return args
 
 
 def main():
     args = parse_args()
 
-    # Discover sessions based on mode
     if args.session:
-        # Single session mode
         if args.video_only:
-            # Find video file in session
             video_files = [
                 f for f in args.session.iterdir()
                 if f.is_file() and f.suffix.lower() in tuple(args.video_extensions)
@@ -301,7 +304,7 @@ def main():
             raise RuntimeError('GEMINI_API_KEY environment variable not set')
 
         print(f"[Main] Using Gemini client with {args.num_workers} concurrent workers")
-        client = GeminiPromptClient(api_key=api_key)
+        client = GeminiPromptClient(api_key=api_key, model_name=args.model_id)
 
         processor = SessionProcessor(
             prompt_client=client,
@@ -324,7 +327,7 @@ def main():
         print(f"[Main] Using Qwen3-VL client with batch size {args.batch_size}")
 
         with VLLMServerManager(
-            model_path=args.qwen_model_path,
+            model_path=args.model_id,
             port=args.vllm_port,
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
@@ -335,7 +338,7 @@ def main():
 
             client = Qwen3VLPromptClient(
                 base_url=server.get_base_url(),
-                model_name=args.qwen_model_path,
+                model_name=args.model_id,
             )
 
             processor = SessionProcessor(

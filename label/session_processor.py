@@ -333,10 +333,7 @@ class SessionProcessor:
                 response_mime_type="application/json"
             )
 
-            if hasattr(resp, 'json'):
-                body = resp.json if not callable(resp.json) else resp.json()
-            else:
-                body = json.loads(getattr(resp, 'text', str(resp)))
+            body = json.loads(getattr(resp, 'text', str(resp)))
             return body
 
         except Exception as e:
