@@ -1,4 +1,3 @@
-"""Enhanced session processor with captions export and video-only mode."""
 from __future__ import annotations
 from typing import List, Tuple, Any, Dict, Optional
 from pathlib import Path
@@ -10,7 +9,7 @@ import json
 from tqdm import tqdm
 
 from label.clients import PromptClient
-from record.models.aggregation import AggregationRequest, ProcessedAggregation
+from record.models.aggregation import ProcessedAggregation, AggregationRequest
 
 
 @dataclass
@@ -418,47 +417,67 @@ class SessionProcessor:
         """Extract captions from VLM result and adjust timestamps."""
         captions = []
 
-        if isinstance(result, dict) and "error" not in result:
-            # Try to extract tasks/captions from the result
-            # Adjust this based on your actual VLM response schema
-            tasks_list = result.get("tasks", [])
+        if isinstance(result, str):
+            return captions  # No structured data to extract
+        items = result
 
-            for task_item in tasks_list:
-                # Extract timestamp (assuming format like "MM:SS" in the response)
-                timestamp_str = task_item.get("timestamp", "00:00")
+        for task_item in items:
+            # Extract start and end timestamps
+            start_str = task_item.get("start", "00:00")
+            end_str = task_item.get("end", start_str)
 
-                # Parse MM:SS format
-                try:
-                    parts = timestamp_str.split(":")
-                    if len(parts) == 2:
-                        minutes = int(parts[0])
-                        seconds = int(parts[1])
-                        relative_seconds = minutes * 60 + seconds
-                    else:
-                        relative_seconds = 0
-                except (ValueError, AttributeError):
-                    relative_seconds = 0
+            # Parse MM:SS format for start time
+            try:
+                parts = start_str.split(":")
+                if len(parts) == 2:
+                    minutes = int(parts[0])
+                    seconds = int(parts[1])
+                    relative_start_seconds = minutes * 60 + seconds
+                else:
+                    relative_start_seconds = 0
+            except (ValueError, AttributeError):
+                relative_start_seconds = 0
 
-                # Adjust timestamp by adding chunk offset
-                absolute_seconds = task.chunk_start_time + relative_seconds
+            # Parse MM:SS format for end time
+            try:
+                parts = end_str.split(":")
+                if len(parts) == 2:
+                    minutes = int(parts[0])
+                    seconds = int(parts[1])
+                    relative_end_seconds = minutes * 60 + seconds
+                else:
+                    relative_end_seconds = relative_start_seconds
+            except (ValueError, AttributeError):
+                relative_end_seconds = relative_start_seconds
 
-                # Format as MM:SS
-                abs_minutes = int(absolute_seconds // 60)
-                abs_seconds = int(absolute_seconds % 60)
-                absolute_timestamp = f"{abs_minutes:02d}:{abs_seconds:02d}"
+            # Adjust timestamps by adding chunk offset
+            absolute_start_seconds = task.chunk_start_time + relative_start_seconds
+            absolute_end_seconds = task.chunk_start_time + relative_end_seconds
 
-                caption_entry = CaptionEntry(
-                    timestamp_seconds=absolute_seconds,
-                    timestamp_formatted=absolute_timestamp,
-                    caption=task_item.get("description", ""),
-                    chunk_index=task.chunk_index,
-                    metadata={
-                        "original_timestamp": timestamp_str,
-                        "chunk_offset": task.chunk_start_time,
-                        **{k: v for k, v in task_item.items() if k not in ["timestamp", "description"]}
-                    }
-                )
-                captions.append(caption_entry)
+            # Format as MM:SS
+            start_minutes = int(absolute_start_seconds // 60)
+            start_secs = int(absolute_start_seconds % 60)
+            absolute_start_timestamp = f"{start_minutes:02d}:{start_secs:02d}"
+
+            end_minutes = int(absolute_end_seconds // 60)
+            end_secs = int(absolute_end_seconds % 60)
+            absolute_end_timestamp = f"{end_minutes:02d}:{end_secs:02d}"
+
+            caption_entry = CaptionEntry(
+                timestamp_seconds=absolute_start_seconds,
+                timestamp_formatted=absolute_start_timestamp,
+                caption=task_item.get("caption", task_item.get("description", "")),
+                chunk_index=task.chunk_index,
+                metadata={
+                    "original_start": start_str,
+                    "original_end": end_str,
+                    "end_timestamp": absolute_end_timestamp,
+                    "end_timestamp_seconds": absolute_end_seconds,
+                    "chunk_offset": task.chunk_start_time,
+                    **{k: v for k, v in task_item.items() if k not in ["start", "end", "caption", "description"]}
+                }
+            )
+            captions.append(caption_entry)
 
         return captions
 
@@ -470,13 +489,22 @@ class SessionProcessor:
         with open(output_path, 'w', encoding='utf-8') as f:
             for caption in captions:
                 entry = {
-                    "timestamp": caption.timestamp_formatted,
-                    "timestamp_seconds": caption.timestamp_seconds,
+                    "start": caption.timestamp_formatted,
+                    "end": caption.metadata.get("end_timestamp", caption.timestamp_formatted),
+                    "start_seconds": caption.timestamp_seconds,
+                    "end_seconds": caption.metadata.get("end_timestamp_seconds", caption.timestamp_seconds),
                     "caption": caption.caption,
                     "chunk_index": caption.chunk_index,
                 }
+
+                # Add any additional metadata (excluding what we've already added)
                 if caption.metadata:
-                    entry["metadata"] = caption.metadata
+                    extra_metadata = {
+                        k: v for k, v in caption.metadata.items()
+                        if k not in ["end_timestamp", "end_timestamp_seconds", "original_start", "original_end", "chunk_offset"]
+                    }
+                    if extra_metadata:
+                        entry["metadata"] = extra_metadata
 
                 f.write(json.dumps(entry, ensure_ascii=False) + '\n')
 

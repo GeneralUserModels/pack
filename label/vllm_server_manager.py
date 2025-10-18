@@ -18,6 +18,7 @@ class VLLMServerManager:
         max_model_len: Optional[int] = None,
         guided_decoding_backend: str = "outlines",
         host: str = "127.0.0.1",
+        moe_expert_parallel: bool = False,
     ):
         self.model_path = model_path
         self.port = port
@@ -28,6 +29,7 @@ class VLLMServerManager:
         self.guided_decoding_backend = guided_decoding_backend
         self.process: Optional[subprocess.Popen] = None
         self.base_url = f"http://{host}:{port}"
+        self.moe_expert_parallel = moe_expert_parallel
 
         # Register cleanup on exit
         atexit.register(self.stop)
@@ -46,6 +48,8 @@ class VLLMServerManager:
             "--gpu-memory-utilization", str(self.gpu_memory_utilization),
             "--guided-decoding-backend", self.guided_decoding_backend,
         ]
+        if self.moe_expert_parallel:
+            cmd.append("--moe-expert-parallel")
 
         if self.max_model_len is not None:
             cmd.extend(["--max-model-len", str(self.max_model_len)])

@@ -218,6 +218,12 @@ def parse_args():
         help="Timeout for vLLM server startup (seconds)"
     )
 
+    p.add_argument(
+        "--moe-expert-parallel",
+        action="store_true",
+        help="Enable MoE expert parallelism)"
+    )
+
     # Video options (for standard mode)
     p.add_argument(
         "--label-video",
@@ -323,6 +329,7 @@ def main():
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
             max_model_len=args.max_model_len,
+            moe_expert_parallel=args.moe_expert_parallel,
         ) as server:
             server._wait_for_server(timeout=args.server_startup_timeout)
 
