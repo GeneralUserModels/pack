@@ -15,7 +15,8 @@ class ScreenshotHandler:
         self,
         image_queue: EventQueue,
         fps: int = 30,
-        monitor_index: Optional[int] = None
+        monitor_index: Optional[int] = None,
+        max_res: Optional[tuple[int, int]] = None
     ):
         """
         Initialize the screenshot manager.
@@ -28,6 +29,7 @@ class ScreenshotHandler:
         self.image_queue = image_queue
         self.fps = fps
         self.monitor_index = monitor_index
+        self.max_res = max_res
         self.interval = 1.0 / fps
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -43,7 +45,7 @@ class ScreenshotHandler:
                 try:
                     x, y = self.mouse_controller.position
                     timestamp = time.time()
-                    screenshot, monitor_index = capture_screenshot(sct, x, y)
+                    screenshot, monitor_index = capture_screenshot(sct, x, y, max_res=self.max_res)
 
                     if screenshot is not None:
                         buffer_image = BufferImage(
