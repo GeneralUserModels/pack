@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import math
@@ -8,7 +9,29 @@ from tqdm import tqdm
 
 from label.clients import PromptClient
 from record.models.aggregation import ProcessedAggregation, AggregationRequest
-from label.utils import SessionTask, CaptionEntry
+
+
+@dataclass
+class SessionTask:
+    """Single chunk processing task."""
+    session_id: str
+    chunk_index: int
+    video_path: Path
+    prompt: str
+    aggregations: List[Any]
+    output_dir: Path
+    chunk_start_time: float
+    chunk_duration: int
+
+
+@dataclass
+class CaptionEntry:
+    """Caption with timestamp."""
+    timestamp_seconds: float
+    timestamp_formatted: str
+    caption: str
+    chunk_index: int
+    metadata: Optional[Dict] = None
 
 
 class SessionProcessor:
@@ -79,7 +102,6 @@ class SessionProcessor:
                 print(f"[Warning] No screenshots in {session_id}")
                 continue
 
-            # Sort screenshots by timestamp
             images_and_ts = [
                 (p, extract_timestamp_from_filename(p))
                 for p in screenshots
@@ -90,7 +112,6 @@ class SessionProcessor:
             global_start = images_and_ts[0][1]
             image_paths = [p for p, _ in images_and_ts]
 
-            # Create master video
             master_video = config.out_chunks_dir / "full_session.mp4"
             if not master_video.exists():
                 pad_to = compute_max_image_size(image_paths)
@@ -315,6 +336,15 @@ class SessionProcessor:
                 captions_path = config.session_folder / "captions.jsonl"
                 self._save_captions(session_captions[session_id], captions_path)
 
+                if not self.video_only_mode:
+                    from label.caption_matching import create_matched_captions_for_session
+                    matched_path = create_matched_captions_for_session(
+                        config.session_folder,
+                        fps=getattr(self, '_session_fps', 1)
+                    )
+                    if matched_path:
+                        print(f"[Processor] ✓ Created matched captions: {matched_path}")
+
                 print(f"[Processor] ✓ Saved {session_id}: {summary_path}")
 
         return session_results
@@ -332,13 +362,13 @@ class SessionProcessor:
             try:
                 mins, secs = map(int, start_str.split(":"))
                 rel_start = mins * 60 + secs
-            except:
+            except Exception:
                 rel_start = 0
 
             try:
                 mins, secs = map(int, end_str.split(":"))
                 rel_end = mins * 60 + secs
-            except:
+            except Exception:
                 rel_end = rel_start
 
             # Adjust to absolute time
@@ -408,7 +438,6 @@ class SessionProcessor:
         if not aggs:
             return []
 
-        min_ts = min(a.request.timestamp for a in aggs)
         max_ts = max(a.request.timestamp for a in aggs)
         num_chunks = max(1, math.ceil((max_ts - chunk_start) / float(chunk_duration)))
 

@@ -5,7 +5,6 @@ from label.discovery import discover_sessions, discover_video_only_sessions
 from label.clients import create_client
 from label.session_processor import SessionProcessor
 from label.vllm_server_manager import VLLMServerManager
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,6 +31,10 @@ def parse_args():
     p.add_argument("--video-extensions", nargs="+", default=[".mp4", ".avi", ".mov", ".mkv"])
     p.add_argument("--label-video", action="store_true", help="Annotate video frames")
 
+    # Visualization
+    p.add_argument("--visualize-session", action="store_true",
+                   help="Create annotated video with captions and events after processing")
+
     # VLM client selection
     p.add_argument("--client", choices=["gemini", "qwen3vl"], default="gemini")
     p.add_argument("--model-id", default="", help="Model path or ID")
@@ -52,7 +55,6 @@ def parse_args():
 
     args = p.parse_args()
 
-    # Set default model IDs
     if not args.model_id:
         args.model_id = 'gemini-2.5-flash' if args.client == 'gemini' else 'Qwen/Qwen3-VL-8B-Thinking-FP8'
 
@@ -192,7 +194,6 @@ def main():
     if not session_configs:
         return
 
-    # Process based on client type
     if args.client == 'gemini':
         results = process_with_gemini(args, session_configs)
     elif args.client == 'qwen3vl':
@@ -201,6 +202,31 @@ def main():
         raise ValueError(f"Unknown client: {args.client}")
 
     print(f"[Main] ✓ Processed {len(results)} sessions successfully")
+
+    if args.visualize_session:
+        print("\n[Main] Creating visualizations...")
+        from label.session_visualizer import SessionVisualizer
+
+        visualizer = SessionVisualizer()
+
+        for config in session_configs:
+            session_id = config.session_folder.name
+
+            matched_captions_path = config.session_folder / "matched_captions.jsonl"
+            if not matched_captions_path.exists():
+                print(f"[Main] Skipping visualization for {session_id}: no matched_captions.jsonl")
+                continue
+
+            try:
+                output_video = config.session_folder / "annotated_session.mp4"
+                visualizer.visualize_session(
+                    config.session_folder,
+                    output_video,
+                    fps=args.fps
+                )
+                print(f"[Main] ✓ Created visualization: {output_video}")
+            except Exception as e:
+                print(f"[Main] ✗ Failed to visualize {session_id}: {e}")
 
 
 if __name__ == '__main__':
