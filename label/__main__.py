@@ -52,7 +52,7 @@ def parse_args():
     qwen_group.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     qwen_group.add_argument("--max-model-len", type=int, default=None)
     qwen_group.add_argument("--server-startup-timeout", type=int, default=600)
-    qwen_group.add_argument("--moe-expert-parallel", action="store_true")
+    qwen_group.add_argument("--enable-expert-parallel", action="store_true")
 
     args = p.parse_args()
 
@@ -160,7 +160,7 @@ def process_with_qwen3vl(args, session_configs):
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
             max_model_len=args.max_model_len,
-            moe_expert_parallel=args.moe_expert_parallel,
+            moe_expert_parallel=args.enable_expert_parallel,
             startup_timeout=args.server_startup_timeout,
         ) as server:
             client = create_client(
