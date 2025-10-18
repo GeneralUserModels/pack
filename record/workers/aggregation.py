@@ -24,7 +24,7 @@ class AggregationWorker:
 
         self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
         self.processed_requests = set()
-        self.processed_event_timestamps = set()  # Track which events have been processed
+        self.processed_event_timestamps = set()
 
     def process_aggregation(self, request: AggregationRequest) -> ProcessedAggregation:
         """
@@ -46,16 +46,20 @@ class AggregationWorker:
 
             self.processed_requests.add(request_key)
 
-            # Screenshot path is set here when saving
             if request.screenshot is not None:
                 request.screenshot_path = self.save_worker.save_screenshot(
                     request.screenshot, force_save=True, save_reason=request.reason
                 )
 
-            if request.end_timestamp is None:
-                request.end_timestamp = float('inf')
+            start_ts = request.screenshot_timestamp
 
-            events = self._get_events_between(request.timestamp, request.end_timestamp)
+            if request.end_screenshot_timestamp is not None:
+                end_ts = request.end_screenshot_timestamp
+            else:
+                print(f"  - No end timestamp for burst starting at {start_ts:.3f}, collecting all remaining events.")
+                end_ts = float('inf')
+
+            events = self._get_events_between(start_ts, end_ts)
 
             processed_agg = ProcessedAggregation(
                 request=request,
@@ -66,15 +70,15 @@ class AggregationWorker:
 
             return processed_agg
 
-    def _get_events_between(self, start_timestamp: float, end_timestamp: float) -> list:
+    def _get_events_between(self, start_screenshot_timestamp: float, end_screenshot_timestamp: float) -> list:
         """
-        Get all events (of ALL types) between two timestamps.
+        Get all events (of ALL types) between two screenshot timestamps.
         Events are assigned to bursts based on which burst they fall into.
-        An event belongs to a burst if: start_timestamp <= event.timestamp < end_timestamp
+        An event belongs to a burst if: start_screenshot_timestamp <= event.timestamp < end_screenshot_timestamp
 
         Args:
-            start_timestamp: Start time (inclusive)
-            end_timestamp: End time (exclusive). If inf, include all remaining events.
+            start_screenshot_timestamp: Start screenshot timestamp (inclusive)
+            end_screenshot_timestamp: End screenshot timestamp (exclusive). If inf, include all remaining events.
 
         Returns:
             List of serialized events
@@ -87,7 +91,7 @@ class AggregationWorker:
                 # Only process if not already processed (avoid duplicates)
                 event_key = (e.timestamp, e.event_type, id(e))
 
-                if start_timestamp <= e.timestamp < end_timestamp:
+                if start_screenshot_timestamp <= e.timestamp < end_screenshot_timestamp:
                     if event_key not in self.processed_event_timestamps:
                         events_to_process.append(e)
                         self.processed_event_timestamps.add(event_key)
@@ -115,10 +119,13 @@ class AggregationWorker:
                 'event_type': aggregation.request.event_type,
                 'is_start': aggregation.request.is_start,
                 'screenshot_path': aggregation.request.screenshot_path,
-                'screenshot_timestamp': aggregation.request.screenshot.timestamp if aggregation.request.screenshot else None,
+                'screenshot_timestamp': aggregation.request.screenshot_timestamp,
+                'end_screenshot_timestamp': aggregation.request.end_screenshot_timestamp,
                 'num_events': len(aggregation.events),
                 'events': aggregation.events,
-                'cursor_position': aggregation.events[0].get('cursor_position') if aggregation.events else None
+                'cursor_position': aggregation.events[0].get('cursor_position') if aggregation.events else None,
+                'monitor': aggregation.request.monitor,
+                'burst_id': aggregation.request.burst_id
             }
 
             with open(self.aggregations_file, 'a') as f:

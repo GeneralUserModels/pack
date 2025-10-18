@@ -25,17 +25,18 @@ def get_active_monitor(x: int, y: int, sct) -> int:
     return 0
 
 
-def _resize_to_fhd_if_needed(img_rgb: np.ndarray, portrait_fhd=(1080, 1920), landscape_fhd=(1920, 1080)) -> np.ndarray:
+def _resize_if_needed(img_rgb: np.ndarray, max_res) -> np.ndarray:
     """
     Resize (downscale only) a HxWx3 uint8 RGB numpy image so it fits within the appropriate
     FullHD box depending on orientation. Returns the (possibly) resized image.
     """
     h, w = img_rgb.shape[:2]
-
+    landscape_res = (max_res[0], max_res[1])
+    portrait_res = (max_res[1], max_res[0])
     if w >= h:
-        target_w, target_h = landscape_fhd
+        target_w, target_h = landscape_res
     else:
-        target_w, target_h = portrait_fhd
+        target_w, target_h = portrait_res
 
     scale = min(target_w / w, target_h / h, 1.0)
 
@@ -50,7 +51,7 @@ def _resize_to_fhd_if_needed(img_rgb: np.ndarray, portrait_fhd=(1080, 1920), lan
     return np.asarray(pil_resized)
 
 
-def capture_screenshot(sct, x: int, y: int, scale_to_fhd: bool = False) -> Tuple[Optional[np.ndarray], Optional[int]]:
+def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> Tuple[Optional[np.ndarray], Optional[int]]:
     """
     Capture a screenshot from sct that contains (x, y).
     If scale_to_fhd is True, downscale the image to Full HD (landscape 1920x1080 or portrait 1080x1920)
@@ -74,8 +75,8 @@ def capture_screenshot(sct, x: int, y: int, scale_to_fhd: bool = False) -> Tuple
         img = np.array(screenshot)
         img_rgb = img[:, :, [2, 1, 0]]
 
-        if scale_to_fhd:
-            img_rgb = _resize_to_fhd_if_needed(img_rgb)
+        if max_res is not None:
+            img_rgb = _resize_if_needed(img_rgb, max_res)
 
         return img_rgb, monitor_index
     except Exception as e:

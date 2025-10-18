@@ -21,7 +21,8 @@ class ScreenRecorder:
         fps: int = 16,
         buffer_seconds: int = 12,
         buffer_all: bool = False,
-        monitor: bool = False
+        monitor: bool = False,
+        max_res: tuple[int, int] = None
     ):
         """
         Initialize the screen recorder.
@@ -35,12 +36,13 @@ class ScreenRecorder:
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
+        self.max_res = max_res
 
         self.image_buffer_size = fps * buffer_seconds
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v9_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")
@@ -83,7 +85,8 @@ class ScreenRecorder:
 
         self.screenshot_manager = ScreenshotHandler(
             image_queue=self.image_queue,
-            fps=self.fps
+            fps=self.fps,
+            max_res=self.max_res
         )
 
         self.mouse_listener = None
@@ -258,6 +261,13 @@ def main():
         action="store_true",
         help="Enable real-time monitoring of the last session"
     )
+    parser.add_argument(
+        "-r", "--max-res",
+        type=int,
+        default=None,
+        nargs=2,
+        help="Maximal resolution for screenshots (width, height)"
+    )
 
     args = parser.parse_args()
 
@@ -265,7 +275,8 @@ def main():
         fps=args.fps,
         buffer_seconds=args.buffer_seconds,
         buffer_all=args.buffer_all_images,
-        monitor=args.monitor
+        monitor=args.monitor,
+        max_res=args.max_res
     )
     recorder.run()
 

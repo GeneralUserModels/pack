@@ -7,6 +7,7 @@ import json
 import sys
 import ast
 from datetime import datetime
+import re
 
 INNER_TO_CATEGORY = {
     "mouse_down": "click",
@@ -20,7 +21,9 @@ INNER_TO_CATEGORY = {
 CATEGORIES = ["click", "move", "scroll", "key"]
 DUPLICATES_CATEGORY = "duplicates"
 UNMATCHED_CATEGORY = "unmatched"
-ALL_PLOTTING_CATEGORIES = CATEGORIES + [DUPLICATES_CATEGORY, UNMATCHED_CATEGORY]
+SCREENSHOT_CATEGORY = "screenshots"
+# add screenshots row before duplicates/unmatched
+ALL_PLOTTING_CATEGORIES = CATEGORIES + [SCREENSHOT_CATEGORY, DUPLICATES_CATEGORY, UNMATCHED_CATEGORY]
 
 CATEGORY_COLORS = {'key': '#8B7FC7', 'click': '#FF6B6B', 'move': '#51CF66', 'scroll': '#FFD43B'}
 
@@ -159,7 +162,64 @@ def collect_timestamps_from_events_file(objects):
     return sorted(ts_list)
 
 
-def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_path=None):
+def collect_screenshots_from_aggregations(objects):
+    """
+    Parse screenshot timestamps and reasons from aggregation objects' "screenshot_path".
+    Returns list of dicts: [{'ts': float_timestamp, 'reason': reason_str, 'color': color_str}, ...]
+    Expected filename pattern examples:
+      1760702571.228687_reason_move_start.jpg
+      1760702571.228687-some-other-pattern_reason_click.jpg
+    The parser attempts to extract a leading float timestamp and the 'reason' piece before the extension.
+    """
+    screenshots = []
+    # regex: capture float (digits + dot + digits), then optionally any chars, then _reason_ then reason (non-greedy) until dot (extension)
+    pattern = re.compile(r"(?P<ts>\d+\.\d+)[^/]*?(?:_reason_|-reason-)?(?P<reason>[^.]+)\.")
+    for obj in objects:
+        sp = obj.get("screenshot_path")
+        if not sp or not isinstance(sp, str):
+            continue
+        fname = Path(sp).name
+        m = pattern.search(fname)
+        if not m:
+            # fallback: try to parse leading float timestamp only
+            m2 = re.match(r"(?P<ts>\d+\.\d+)", fname)
+            if m2:
+                try:
+                    ts = float(m2.group("ts"))
+                except Exception:
+                    continue
+                reason = "unknown"
+            else:
+                continue
+        else:
+            try:
+                ts = float(m.group("ts"))
+            except Exception:
+                continue
+            reason = m.group("reason")
+        # normalize reason: pick a category keyword if present in reason
+        reason_lower = reason.lower()
+        color = "#888888"  # default grey
+        matched_cat = None
+        for cat in CATEGORIES:
+            if cat in reason_lower:
+                matched_cat = cat
+                color = CATEGORY_COLORS.get(cat, color)
+                break
+        # also try to match keys from INNER_TO_CATEGORY (e.g., mouse_* -> click)
+        if matched_cat is None:
+            for k, v in INNER_TO_CATEGORY.items():
+                if k in reason_lower:
+                    matched_cat = v
+                    color = CATEGORY_COLORS.get(v, color)
+                    break
+        screenshots.append({'ts': ts, 'reason': reason, 'color': color})
+    # sort by timestamp
+    screenshots.sort(key=lambda s: s['ts'])
+    return screenshots
+
+
+def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, screenshots, out_path=None):
     num_rows = len(ALL_PLOTTING_CATEGORIES)
     fig, axes = plt.subplots(nrows=num_rows, ncols=1, sharex=True, figsize=(14, 2.2 * num_rows), constrained_layout=True)
     if num_rows == 1:
@@ -173,6 +233,8 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_p
             title = f"{DUPLICATES_CATEGORY} (events.jsonl timestamps present more than once in aggregations)"
         elif cat == UNMATCHED_CATEGORY:
             title = f"{UNMATCHED_CATEGORY} (events.jsonl timestamps not in aggregations)"
+        elif cat == SCREENSHOT_CATEGORY:
+            title = f"{SCREENSHOT_CATEGORY} (screenshot timestamps from aggregations)"
         ax.set_title(title)
 
         # plot inner events (only for first 4 categories)
@@ -183,6 +245,22 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_p
                 jitter = (np.random.rand(len(x_dt)) - 0.5) * 0.2
                 y_vals = np.zeros(len(x_dt)) + jitter
                 ax.scatter(x_dt, y_vals, s=18, edgecolors="k", linewidths=0.3, zorder=5)
+
+        # screenshots row -> vertical lines colored by reason/category
+        if cat == SCREENSHOT_CATEGORY:
+            if screenshots:
+                for s in screenshots:
+                    try:
+                        s_dt = ts_to_dt(s['ts'])
+                    except Exception:
+                        continue
+                    ax.axvline(s_dt, color=s.get('color', '#888888'), linestyle='-', linewidth=1.2, alpha=0.9, zorder=7)
+                # optionally place small markers to make them more visible
+                x_dt_markers = [ts_to_dt(s['ts']) for s in screenshots]
+                y_markers = np.zeros(len(x_dt_markers)) + 0.0
+                ax.scatter(x_dt_markers, y_markers, s=28, marker='|', linewidths=1.2, zorder=8)
+            else:
+                ax.plot([], [])
 
         # duplicates row
         if cat == DUPLICATES_CATEGORY:
@@ -229,7 +307,7 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, out_p
         print(f"Saved plot to: {out_path}")
 
 
-def plot_summary_stats(directory: Path, agg_path: Path, events_path: Path, summary_path: Path):
+def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggregations.jsonl"), events_path: Path = Path("events.jsonl"), summary_path: Path = Path("summary.png")):
     agg_objs = read_jsonl(agg_path)
     events_objs = read_jsonl(events_path)
 
@@ -240,6 +318,9 @@ def plot_summary_stats(directory: Path, agg_path: Path, events_path: Path, summa
 
     events_by_cat, agg_key_counts = collect_inner_events_and_counts(agg_objs)
     intervals_by_cat = collect_outer_intervals(agg_objs)
+
+    # collect screenshots (new)
+    screenshots = collect_screenshots_from_aggregations(agg_objs)
 
     raw_event_ts = collect_timestamps_from_events_file(events_objs)
     raw_event_keys = [(ts, ts_to_key(ts)) for ts in raw_event_ts]
@@ -281,8 +362,9 @@ def plot_summary_stats(directory: Path, agg_path: Path, events_path: Path, summa
     plot_unmatched_ts = unmatched_sorted
 
     plot_all(events_by_cat, intervals_by_cat, plot_duplicates_ts, plot_unmatched_ts,
-             out_path=summary_path)
+             screenshots, out_path=summary_path)
 
 
 if __name__ == "__main__":
+    # if run without args, uses default filenames; adjust as you need
     plot_summary_stats()
