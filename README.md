@@ -1,6 +1,6 @@
 # Pack
 
-**Pack** records and aggregates your computer use — screenshots plus input events (click, keypress, scroll, cursor move). It groups activity into event bursts and uses a VLM + LLM pipeline to generate human-readable captions describing what happened.
+**Pack** records and aggregates your computer use — screenshots plus input events (click, keypress, scroll, cursor move). It groups activity into event bursts and uses a VLM pipeline to generate human-readable captions describing what happened.
 
 <img alt="pack_overview" src="https://github.com/user-attachments/assets/5bab2b31-0564-448c-b286-de06859b7c97" />
 
@@ -40,7 +40,7 @@ Two main entry points:
 * **Record a session** — capture screenshots + input events
   `uv run -m record`
 
-* **Label / process a session** — aggregate events, run VLM/LLM labeling, optionally create annotated videos
+* **Label / process a session** — aggregate events, run VLM labeling, optionally create annotated videos
   `uv run -m label`
 
 Below are the flags for each command (concise, non-code descriptions).
@@ -69,9 +69,9 @@ Below are the flags for each command (concise, non-code descriptions).
 
 ---
 
-## `uv run -m label` — Label a recorded session (VLM + LLM)
+## `uv run -m label` — Label a recorded session (VLM)
 
-**What it does:** loads recorded sessions (or raw video), chunks and formats them, runs VLM/LLM labeling to produce captions, and optionally renders annotated videos.
+**What it does:** loads recorded sessions (or raw video), chunks and formats them, runs VLM labeling to produce captions, and optionally renders annotated videos.
 
 ### Session selection (mutually exclusive)
 
@@ -178,7 +178,7 @@ uv run -m label \
 ## Label output (per processed session)
 
 * Screenshot video and chunks
-* `captions.jsonl` and caption chunk files — LLM-generated action captions with relative timestamps
+* `captions.jsonl` and caption chunk files — VLM-generated action captions with relative timestamps
 * `matched_captions.jsonl` — captions matched to screenshots with recorded timestamps and input events
 * `annotated_session.mp4` — annotated video (when `--visualize-session` is used)
 
@@ -214,7 +214,7 @@ Aggregation flow (high level):
 The `label` module:
 
 * Loads sessions or raw video, chunks them and their logs, and prepares inputs for the VLM.
-* Uses prompts (in `label/prompts`) to instruct the VLM/LLM to generate captions that describe the user’s actions and context.
+* Uses prompts (in `label/prompts`) to instruct the VLM to generate captions that describe the user’s actions and context.
 * Produces `captions.jsonl` and `matched_captions.jsonl` (captions aligned to screenshots and events).
 * Optionally renders an annotated video (`annotated_session.mp4`) showing captions and event visualizations overlayed on frames.
 
