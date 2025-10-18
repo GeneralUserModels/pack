@@ -8,8 +8,17 @@ from tqdm import tqdm
 
 
 class SessionVisualizer:
+    """Creates annotated videos from matched caption data."""
 
     def __init__(self):
+        """
+        Initialize visualizer.
+
+        Args:
+                - "pad": Center image on canvas (no scaling)
+                - "fit": Scale image to fit canvas (maintain aspect ratio)
+                - "stretch": Stretch to fill canvas (may distort)
+        """
         self._load_fonts()
 
     def _load_fonts(self):
@@ -38,6 +47,11 @@ class SessionVisualizer:
         """
         Create annotated video from session's matched_captions.jsonl.
 
+        This version first loads all valid images, determines the "best"
+        resolution (maximum width and maximum height among loaded images),
+        and then pads/resizes every image to that target resolution before
+        annotating and writing frames.
+
         Args:
             session_dir: Path to session directory
             output_video_path: Path for output video (default: session_dir/annotated_session.mp4)
@@ -59,29 +73,96 @@ class SessionVisualizer:
                 if line.strip():
                     matched_data.append(json.loads(line))
 
-        print(f"[Visualizer] Processing {len(matched_data)} frames")
+        print(f"[Visualizer] Found {len(matched_data)} caption entries")
+
+        # Resolve image paths and preload all images so we can determine target size.
+        resolved = []  # list of tuples (Path to image, entry)
+        for idx, entry in enumerate(matched_data):
+            img_path = entry.get('img')
+            if not img_path:
+                print(f"[Visualizer] Warning: no image for entry {idx}")
+                continue
+
+            p = Path(img_path)
+            if not p.exists():
+                p = session_dir / img_path
+
+            if not p.exists():
+                print(f"[Visualizer] Warning: Image not found for entry {idx}: {img_path}")
+                continue
+
+            resolved.append((p, entry))
+
+        if not resolved:
+            raise RuntimeError("No valid images found to create video")
+
+        print(f"[Visualizer] Loading {len(resolved)} images to determine best resolution...")
+
+        loaded = []  # list of tuples (PIL.Image, entry)
+        widths = []
+        heights = []
+
+        # Load images (be mindful of memory for very large sessions)
+        for p, entry in tqdm(resolved, desc="Loading images"):
+            try:
+                im = Image.open(p).convert('RGB')
+            except Exception as e:
+                print(f"[Visualizer] Warning: failed to open {p}: {e}")
+                continue
+
+            widths.append(im.width)
+            heights.append(im.height)
+            loaded.append((im, entry))
+
+        if not loaded:
+            raise RuntimeError("No images could be opened for processing")
+
+        # Choose target resolution: maximum width and maximum height among images.
+        # This ensures we don't cut any image; smaller images will be padded and
+        # optionally upscaled to fit while maintaining aspect ratio.
+        target_w = max(widths)
+        target_h = max(heights)
+
+        print(f"[Visualizer] Target canvas size: {target_w}x{target_h}")
 
         with tempfile.TemporaryDirectory(prefix="session_viz_") as tmpdir:
             tmpdir_path = Path(tmpdir)
 
-            for idx, entry in enumerate(tqdm(matched_data, desc="Annotating frames")):
-                img_path = entry.get('img')
+            for idx, (img, entry) in enumerate(tqdm(loaded, desc="Annotating frames")):
+                # Resize (maintain aspect) to fit within target and then pad to exact size
+                w, h = img.size
 
-                if img_path is None or not Path(img_path).exists():
-                    if img_path:
-                        img_path = session_dir / img_path
+                # Calculate scale to fit inside target (allow upscaling)
+                scale = min(target_w / w, target_h / h)
+                new_w = max(1, int(round(w * scale)))
+                new_h = max(1, int(round(h * scale)))
 
-                    if not img_path or not Path(img_path).exists():
-                        print(f"[Visualizer] Warning: Image {img_path} not found for frame {idx}")
-                        continue
+                if (new_w, new_h) != (w, h):
+                    resized = img.resize((new_w, new_h), resample=Image.LANCZOS)
+                else:
+                    resized = img
 
-                img = Image.open(img_path).convert('RGB')
+                # Create background canvas and paste centered
+                canvas = Image.new('RGB', (target_w, target_h), (0, 0, 0))
+                paste_x = (target_w - new_w) // 2
+                paste_y = (target_h - new_h) // 2
+                canvas.paste(resized, (paste_x, paste_y))
+
+                # If we created a new resized image separate from original, and it's not the original,
+                # close the original to free memory
+                if resized is not img:
+                    try:
+                        img.close()
+                    except Exception:
+                        pass
+
+                # Annotate the padded canvas
                 annotated_img = self._annotate_frame(
-                    img,
-                    entry['caption'],
-                    entry['raw_events'],
+                    canvas,
+                    entry.get('caption', ''),
+                    entry.get('raw_events', []),
                     entry.get('start_formatted', ''),
-                    entry.get('end_formatted', '')
+                    entry.get('end_formatted', ''),
                 )
 
                 frame_path = tmpdir_path / f"{idx:06d}.jpg"

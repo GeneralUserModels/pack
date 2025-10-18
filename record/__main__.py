@@ -42,7 +42,7 @@ class ScreenRecorder:
         self.event_buffer_size = fps * buffer_seconds * 30
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_v9_{timestamp}"
+        self.session_dir = Path(__file__).parent.parent / "logs" / f"session_{timestamp}"
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"Session directory: {self.session_dir}")

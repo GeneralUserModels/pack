@@ -12,24 +12,16 @@
 
 * Python **3.11+** (3.12.7 recommended)
 * `ffmpeg` (for video generation)
-* `uv` (invocation helper used in examples)
+* [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
 
 ## Install
 
-1. Clone the repo:
-
-```bash
-git clone git@github.com:GeneralUserModels/pack.git
+```shell
+https://github.com/GeneralUserModels/pack.git  # Clone repo
+cd pack
+uv sync --python 3.12.7  # Install dependencies
+cp .env.example .env  #  Optionally add your Gemini API key here
 ```
-
-2. Create a Python environment and install dependencies:
-
-```bash
-uv sync --python 3.12.7
-```
-
-3. Copy `.env.example` → `.env` and add API keys (optional).
-   If you plan to use **Gemini** for labeling, add your Gemini API key to `.env`.
 
 ---
 
