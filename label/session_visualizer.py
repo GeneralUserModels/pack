@@ -85,7 +85,7 @@ class SessionVisualizer:
 
             p = Path(img_path)
             if not p.exists():
-                p = session_dir / img_path
+                p = session_dir / "screenshots" / p.name
 
             if not p.exists():
                 print(f"[Visualizer] Warning: Image not found for entry {idx}: {img_path}")

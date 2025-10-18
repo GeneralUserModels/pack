@@ -82,6 +82,7 @@ Below are the flags for each command (concise, non-code descriptions).
 * `--video-only-prompt` — prompt file for video-only mode. **Default:** `prompts/video_only_prompt.txt`
 * `--video-extensions` — recognized video extensions. **Default:** `[".mp4", ".avi", ".mov", ".mkv"]`
 * `--label-video` — annotate video frames (flag).
+* `--skip-excisting` — skip sessions that already have `matched_captions.jsonl` (flag).
 
 ### Visualization
 
@@ -193,6 +194,7 @@ Burst detection and aggregation:
 2. If a new event occurs within `gap_threshold` seconds of the previous event in that category, it is considered part of the current burst. If the category buffer reaches `total_threshold` events, it is split: the first half is sent to aggregation and the remainder stays buffered. Otherwise the event is appended.
 3. If the new event is outside `gap_threshold`, the existing burst is closed (aggregated) and the new event starts a fresh burst.
 4. A background worker runs every second to close bursts whose most recent event is older than `gap_threshold`, ensuring no events are lost when screenshots roll out of the cyclic buffer.
+5. If the monitor of the cursor position changed compared to the last event, a new burst is started automatically.
 
 Aggregation flow (high level):
 

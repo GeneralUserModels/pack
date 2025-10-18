@@ -15,7 +15,8 @@ class SessionConfig:
 def discover_sessions(
     sessions_root: Path,
     agg_filename: str = "aggregations.jsonl",
-    chunk_duration: int = 60
+    chunk_duration: int = 60,
+    skip_existing: bool = False
 ) -> List[SessionConfig]:
     """Discover sessions with screenshots and aggregation logs."""
     configs = []
@@ -32,8 +33,10 @@ def discover_sessions(
 
         if not (screenshots_dir.exists() and agg_path.exists()):
             continue
+        if session_dir / "matched_captions.jsonl".exists() and skip_existing:
+            print(f"[Discovery] Skipping {session_dir.name}: already processed")
+            continue
 
-        # Check for images
         has_images = any(
             p.suffix.lower() in {".jpg", ".jpeg", ".png"}
             for p in screenshots_dir.iterdir()

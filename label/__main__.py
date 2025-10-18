@@ -30,6 +30,7 @@ def parse_args():
     p.add_argument("--video-only-prompt", default="prompts/video_only_prompt.txt")
     p.add_argument("--video-extensions", nargs="+", default=[".mp4", ".avi", ".mov", ".mkv"])
     p.add_argument("--label-video", action="store_true", help="Annotate video frames")
+    p.add_argument("--skip-excisting", action="store_true", help="Skip already processed sessions")
 
     # Visualization
     p.add_argument("--visualize-session", action="store_true",
@@ -92,7 +93,6 @@ def setup_session_configs(args):
             return []
         print(f"[Main] Found {len(configs)} sessions")
 
-    # Create output directories
     for config in configs:
         config.out_chunks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -105,7 +105,8 @@ def process_with_gemini(args, session_configs):
 
     client = create_client(
         'gemini',
-        model_name=args.model_id
+        model_name=args.model_id,
+        skip_excisting=args.skip_excisting,
     )
 
     processor = SessionProcessor(
