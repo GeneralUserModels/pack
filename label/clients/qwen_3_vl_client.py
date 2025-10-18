@@ -1,4 +1,3 @@
-"""Qwen3-VL client with proper batch processing support."""
 from __future__ import annotations
 from pathlib import Path
 import json
@@ -206,9 +205,7 @@ class Qwen3VLPromptClient(PromptClient):
             request_params["extra_body"] = {"guided_json": schema}
 
         try:
-            # Process batch using multiple parallel requests
-            # vLLM handles batching internally when multiple requests arrive
-            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from concurrent.futures import ThreadPoolExecutor
 
             responses = []
             with ThreadPoolExecutor(max_workers=len(prompts)) as executor:

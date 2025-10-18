@@ -1,3 +1,4 @@
+"""Enhanced session processor with captions export and video-only mode."""
 from __future__ import annotations
 from typing import List, Tuple, Any, Dict, Optional
 from pathlib import Path
@@ -21,14 +22,27 @@ class SessionTask:
     prompt: str
     aggregations: List[Any]
     output_dir: Path
+    chunk_start_time: float  # Start time of this chunk in seconds
+    chunk_duration: int  # Duration of chunk in seconds
 
 
 @dataclass
 class SessionConfig:
     """Configuration for a single session."""
     session_folder: Path
-    agg_jsonl: Path
+    agg_jsonl: Optional[Path]  # None for video-only mode
     out_chunks_dir: Path
+    video_path: Optional[Path] = None  # For video-only mode
+
+
+@dataclass
+class CaptionEntry:
+    """Represents a single caption with timestamp."""
+    timestamp_seconds: float
+    timestamp_formatted: str  # MM:SS format
+    caption: str
+    chunk_index: int
+    metadata: Optional[Dict] = None
 
 
 class SessionProcessor:
@@ -40,6 +54,8 @@ class SessionProcessor:
         num_workers: int = 4,
         batch_size: int = 8,
         use_batching: bool = False,
+        video_only_mode: bool = False,
+        video_only_prompt_file: str = "prompts/video_only_prompt.txt",
     ):
         """
         Initialize parallel processor.
@@ -49,11 +65,15 @@ class SessionProcessor:
             num_workers: Number of concurrent workers (for Gemini)
             batch_size: Batch size for vLLM batch processing
             use_batching: Whether to use batch processing (vLLM) or concurrent workers (Gemini)
+            video_only_mode: If True, process videos without aggregation logs
+            video_only_prompt_file: Prompt file to use for video-only mode
         """
         self.prompt_client = prompt_client
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.use_batching = use_batching
+        self.video_only_mode = video_only_mode
+        self.video_only_prompt_file = video_only_prompt_file
 
     def process_multiple_sessions(
         self,
@@ -74,23 +94,34 @@ class SessionProcessor:
         Returns:
             Dictionary mapping session_id to list of chunk results
         """
+        if self.video_only_mode:
+            return self._process_video_only_sessions(session_configs, chunk_duration)
+        else:
+            return self._process_standard_sessions(session_configs, chunk_duration, fps, label_video)
+
+    def _process_standard_sessions(
+        self,
+        session_configs: List[SessionConfig],
+        chunk_duration: int,
+        fps: int,
+        label_video: bool,
+    ) -> Dict[str, List[Dict]]:
+        """Process sessions with screenshots and aggregation logs."""
         from label.video import (
             compute_max_image_size,
             create_video_from_images,
             split_video,
         )
 
-        print(f"[ParallelProcessor] Processing {len(session_configs)} sessions...")
-        print(f"[ParallelProcessor] Mode: {'Batching' if self.use_batching else 'Concurrent'}")
-        print(f"[ParallelProcessor] Workers/Batch: {self.batch_size if self.use_batching else self.num_workers}")
+        print(f"[SessionProcessor] Processing {len(session_configs)} sessions (standard mode)...")
+        print(f"[SessionProcessor] Mode: {'Batching' if self.use_batching else 'Concurrent'}")
+        print(f"[SessionProcessor] Workers/Batch: {self.batch_size if self.use_batching else self.num_workers}")
 
-        # Step 1: Prepare all sessions (create videos and split into chunks)
         all_tasks = []
 
         for config in tqdm(session_configs, desc="Preparing sessions"):
             session_id = config.session_folder.name
 
-            # List and process screenshots
             screenshots = self.list_screenshots(config.session_folder)
             if not screenshots:
                 print(f"[Warning] No screenshots in {session_id}, skipping...")
@@ -102,7 +133,6 @@ class SessionProcessor:
 
             global_start = images_and_ts[0][1]
 
-            # Create master video
             master_video = config.out_chunks_dir / "full_session.mp4"
             pad_to = compute_max_image_size([p for p, _ in images_and_ts])
             image_paths = [p for p, _ in images_and_ts]
@@ -118,16 +148,13 @@ class SessionProcessor:
                     aggregations=aggs if label_video else None
                 )
 
-            # Split into chunks
             chunks_dir = config.out_chunks_dir / "video_chunks"
             video_chunks = split_video(master_video, chunk_duration, chunks_dir)
 
-            # Load and chunk aggregations
             aggs = self.load_aggregations_jsonl(config.agg_jsonl)
             agg_chunks = self.chunk_aggregations(aggs, chunk_start=global_start, chunk_duration=chunk_duration)
 
-            # Create tasks for each chunk
-            with open(Path(__file__).parent / "prompt.txt", 'r') as f:
+            with open(Path(__file__).parent / "prompts" / "prompt.txt", 'r') as f:
                 prompt_template = f.read()
 
             for i, vpath in enumerate(video_chunks):
@@ -136,13 +163,14 @@ class SessionProcessor:
 
                 this_aggs = agg_chunks[i] if i < len(agg_chunks) else []
 
-                # Build prompt
                 prompts = []
                 for j, a in enumerate(this_aggs):
                     mss = f"{j // 60:02}:{j % 60:02}"
                     prompts.append(a.to_prompt(mss))
                 full_prompt = "".join(prompts)
                 full_prompt = prompt_template.replace("{{LOGS}}", full_prompt)
+
+                chunk_start_time = i * chunk_duration
 
                 task = SessionTask(
                     session_id=session_id,
@@ -151,18 +179,78 @@ class SessionProcessor:
                     prompt=full_prompt,
                     aggregations=this_aggs,
                     output_dir=chunk_out_dir,
+                    chunk_start_time=chunk_start_time,
+                    chunk_duration=chunk_duration,
                 )
                 all_tasks.append(task)
 
-        print(f"[ParallelProcessor] Total tasks: {len(all_tasks)}")
+        print(f"[SessionProcessor] Total tasks: {len(all_tasks)}")
 
-        # Step 2: Process all tasks in parallel
         if self.use_batching:
             results = self._process_with_batching(all_tasks)
         else:
             results = self._process_with_workers(all_tasks)
 
-        # Step 3: Group results by session and save summaries
+        return self._save_results(results, session_configs)
+
+    def _process_video_only_sessions(
+        self,
+        session_configs: List[SessionConfig],
+        chunk_duration: int,
+    ) -> Dict[str, List[Dict]]:
+        """Process sessions with only video files (no aggregation logs)."""
+        from label.video import split_video
+
+        print(f"[SessionProcessor] Processing {len(session_configs)} sessions (video-only mode)...")
+        print(f"[SessionProcessor] Mode: {'Batching' if self.use_batching else 'Concurrent'}")
+        print(f"[SessionProcessor] Workers/Batch: {self.batch_size if self.use_batching else self.num_workers}")
+
+        all_tasks = []
+
+        # Load video-only prompt template
+        prompt_file = Path(__file__).parent / self.video_only_prompt_file
+        if not prompt_file.exists():
+            raise RuntimeError(f"Video-only prompt file not found: {prompt_file}")
+
+        with open(prompt_file, 'r') as f:
+            prompt_template = f.read()
+
+        for config in tqdm(session_configs, desc="Preparing video-only sessions"):
+            session_id = config.session_folder.name
+
+            if config.video_path is None or not config.video_path.exists():
+                print(f"[Warning] Video file not found for {session_id}, skipping...")
+                continue
+
+            # Split video into chunks
+            chunks_dir = config.out_chunks_dir / "video_chunks"
+            video_chunks = split_video(config.video_path, chunk_duration, chunks_dir)
+
+            for i, vpath in enumerate(video_chunks):
+                chunk_out_dir = config.out_chunks_dir / f"chunk_{i:03d}"
+                chunk_out_dir.mkdir(parents=True, exist_ok=True)
+
+                chunk_start_time = i * chunk_duration
+
+                task = SessionTask(
+                    session_id=session_id,
+                    chunk_index=i,
+                    video_path=vpath,
+                    prompt=prompt_template,  # Use video-only prompt
+                    aggregations=[],  # No aggregations in video-only mode
+                    output_dir=chunk_out_dir,
+                    chunk_start_time=chunk_start_time,
+                    chunk_duration=chunk_duration,
+                )
+                all_tasks.append(task)
+
+        print(f"[SessionProcessor] Total tasks: {len(all_tasks)}")
+
+        if self.use_batching:
+            results = self._process_with_batching(all_tasks)
+        else:
+            results = self._process_with_workers(all_tasks)
+
         return self._save_results(results, session_configs)
 
     def _process_with_workers(self, tasks: List[SessionTask]) -> List[Tuple[SessionTask, Any]]:
@@ -170,13 +258,11 @@ class SessionProcessor:
         results = []
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-            # Submit all tasks
             future_to_task = {
                 executor.submit(self._process_single_task, task): task
                 for task in tasks
             }
 
-            # Collect results with progress bar
             with tqdm(total=len(tasks), desc="Processing chunks") as pbar:
                 for future in as_completed(future_to_task):
                     task = future_to_task[future]
@@ -194,11 +280,9 @@ class SessionProcessor:
         """Process tasks using batch generation (for vLLM)."""
         results = []
 
-        # Process in batches
         for i in tqdm(range(0, len(tasks), self.batch_size), desc="Processing batches"):
             batch = tasks[i:i + self.batch_size]
 
-            # Prepare batch inputs
             prompts = [task.prompt for task in batch]
             file_descriptors = []
 
@@ -210,7 +294,6 @@ class SessionProcessor:
                     print(f"\n[Warning] Upload failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
                     file_descriptors.append(None)
 
-            # Batch generation
             try:
                 responses = self.prompt_client.generate_content(
                     prompts,
@@ -218,7 +301,6 @@ class SessionProcessor:
                     response_mime_type="application/json"
                 )
 
-                # Parse responses
                 for task, resp in zip(batch, responses):
                     try:
                         if hasattr(resp, 'json'):
@@ -239,14 +321,12 @@ class SessionProcessor:
 
     def _process_single_task(self, task: SessionTask) -> Any:
         """Process a single task (used by worker threads)."""
-        # Upload file
         file_descriptor = None
         try:
             file_descriptor = self.prompt_client.upload_file(str(task.video_path))
         except Exception as e:
             print(f"\n[Warning] Upload failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
 
-        # Generate
         try:
             resp = self.prompt_client.generate_content(
                 task.prompt,
@@ -269,18 +349,21 @@ class SessionProcessor:
         session_configs: List[SessionConfig]
     ) -> Dict[str, List[Dict]]:
         """Save results and create summaries for each session."""
-        # Group by session
         session_results = {}
+        session_captions = {}  # For collecting all captions per session
 
         for task, result in results:
             if task.session_id not in session_results:
                 session_results[task.session_id] = []
+                session_captions[task.session_id] = []
 
-            # Save individual chunk results
-            agg_output = task.output_dir / "aggregations.json"
-            with open(agg_output, 'w') as f:
-                json.dump([a.to_dict() for a in task.aggregations], f, indent=2, ensure_ascii=False)
+            # Save aggregations (skip in video-only mode)
+            if not self.video_only_mode:
+                agg_output = task.output_dir / "aggregations.json"
+                with open(agg_output, 'w') as f:
+                    json.dump([a.to_dict() for a in task.aggregations], f, indent=2, ensure_ascii=False)
 
+            # Save generation result
             result_output = task.output_dir / "generation_result.json"
             with open(result_output, 'w') as f:
                 json.dump({
@@ -290,23 +373,29 @@ class SessionProcessor:
                     "result": result,
                 }, f, indent=2, ensure_ascii=False)
 
+            # Save prompt
             prompt_output = task.output_dir / "prompt.txt"
             with open(prompt_output, 'w') as f:
                 f.write(task.prompt)
+
+            # Extract captions from result
+            captions = self._extract_captions_from_result(result, task)
+            session_captions[task.session_id].extend(captions)
 
             session_results[task.session_id].append({
                 "chunk_index": task.chunk_index,
                 "video_chunk": str(task.video_path),
                 "aggregations_count": len(task.aggregations),
-                "aggregations_file": str(agg_output),
+                "aggregations_file": str(task.output_dir / "aggregations.json") if not self.video_only_mode else None,
                 "result_file": str(result_output),
                 "prompt_file": str(prompt_output),
             })
 
-        # Save session summaries
+        # Save session summaries and captions
         for config in session_configs:
             session_id = config.session_folder.name
             if session_id in session_results:
+                # Save summary
                 summary_path = config.out_chunks_dir / "all_chunks_summary.json"
                 with open(summary_path, 'w') as f:
                     json.dump(
@@ -315,9 +404,81 @@ class SessionProcessor:
                         indent=2,
                         ensure_ascii=False
                     )
-                print(f"[ParallelProcessor] Saved summary for {session_id}: {summary_path}")
+
+                # Save captions JSONL
+                captions_path = config.session_folder / "captions.jsonl"
+                self._save_captions_jsonl(session_captions[session_id], captions_path)
+
+                print(f"[SessionProcessor] Saved summary for {session_id}: {summary_path}")
+                print(f"[SessionProcessor] Saved captions for {session_id}: {captions_path}")
 
         return session_results
+
+    def _extract_captions_from_result(self, result: Any, task: SessionTask) -> List[CaptionEntry]:
+        """Extract captions from VLM result and adjust timestamps."""
+        captions = []
+
+        if isinstance(result, dict) and "error" not in result:
+            # Try to extract tasks/captions from the result
+            # Adjust this based on your actual VLM response schema
+            tasks_list = result.get("tasks", [])
+
+            for task_item in tasks_list:
+                # Extract timestamp (assuming format like "MM:SS" in the response)
+                timestamp_str = task_item.get("timestamp", "00:00")
+
+                # Parse MM:SS format
+                try:
+                    parts = timestamp_str.split(":")
+                    if len(parts) == 2:
+                        minutes = int(parts[0])
+                        seconds = int(parts[1])
+                        relative_seconds = minutes * 60 + seconds
+                    else:
+                        relative_seconds = 0
+                except (ValueError, AttributeError):
+                    relative_seconds = 0
+
+                # Adjust timestamp by adding chunk offset
+                absolute_seconds = task.chunk_start_time + relative_seconds
+
+                # Format as MM:SS
+                abs_minutes = int(absolute_seconds // 60)
+                abs_seconds = int(absolute_seconds % 60)
+                absolute_timestamp = f"{abs_minutes:02d}:{abs_seconds:02d}"
+
+                caption_entry = CaptionEntry(
+                    timestamp_seconds=absolute_seconds,
+                    timestamp_formatted=absolute_timestamp,
+                    caption=task_item.get("description", ""),
+                    chunk_index=task.chunk_index,
+                    metadata={
+                        "original_timestamp": timestamp_str,
+                        "chunk_offset": task.chunk_start_time,
+                        **{k: v for k, v in task_item.items() if k not in ["timestamp", "description"]}
+                    }
+                )
+                captions.append(caption_entry)
+
+        return captions
+
+    def _save_captions_jsonl(self, captions: List[CaptionEntry], output_path: Path):
+        """Save all captions to a JSONL file."""
+        # Sort by timestamp
+        captions.sort(key=lambda c: c.timestamp_seconds)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            for caption in captions:
+                entry = {
+                    "timestamp": caption.timestamp_formatted,
+                    "timestamp_seconds": caption.timestamp_seconds,
+                    "caption": caption.caption,
+                    "chunk_index": caption.chunk_index,
+                }
+                if caption.metadata:
+                    entry["metadata"] = caption.metadata
+
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
     def load_aggregations_jsonl(self, path: Path) -> List[ProcessedAggregation]:
         """Load aggregations from a JSONL file."""
@@ -373,7 +534,10 @@ class SessionProcessor:
     def list_screenshots(self, session_folder: Path) -> List[Path]:
         """List all screenshot files in the session folder."""
         screenshots = []
-        for p in sorted((session_folder / "screenshots").iterdir()):
+        screenshots_dir = session_folder / "screenshots"
+        if not screenshots_dir.exists():
+            return []
+        for p in sorted(screenshots_dir.iterdir()):
             if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}:
                 screenshots.append(p)
         return screenshots

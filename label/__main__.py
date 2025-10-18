@@ -12,7 +12,12 @@ from label.session_processor import SessionProcessor, SessionConfig
 load_dotenv()
 
 
-def discover_sessions(sessions_root: Path, agg_filename: str = "aggregations.jsonl", chunk_duration: int = 60) -> List[SessionConfig]:
+def discover_sessions(
+    sessions_root: Path,
+    agg_filename: str = "aggregations.jsonl",
+    chunk_duration: int = 60
+) -> List[SessionConfig]:
+    """Discover sessions with screenshots and aggregation logs."""
     configs = []
 
     if not sessions_root.exists():
@@ -51,17 +56,66 @@ def discover_sessions(sessions_root: Path, agg_filename: str = "aggregations.jso
     return configs
 
 
+def discover_video_only_sessions(
+    sessions_root: Path,
+    chunk_duration: int = 60,
+    video_extensions: tuple = (".mp4", ".avi", ".mov", ".mkv")
+) -> List[SessionConfig]:
+    """
+    Discover sessions containing only video files (no logs).
+
+    Looks for video files directly in session folders or in a 'video' subdirectory.
+    """
+    configs = []
+
+    if not sessions_root.exists():
+        raise RuntimeError(f"Sessions root directory not found: {sessions_root}")
+
+    for session_dir in sorted(sessions_root.iterdir()):
+        if not session_dir.is_dir():
+            continue
+
+        # Look for video file in session directory
+        video_files = [
+            f for f in session_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in video_extensions
+        ]
+
+        # Also check 'video' subdirectory
+        video_subdir = session_dir / "video"
+        if video_subdir.exists():
+            video_files.extend([
+                f for f in video_subdir.iterdir()
+                if f.is_file() and f.suffix.lower() in video_extensions
+            ])
+
+        if video_files:
+            # Use the first video file found
+            video_path = video_files[0]
+            configs.append(SessionConfig(
+                session_folder=session_dir,
+                agg_jsonl=None,  # No aggregation logs
+                out_chunks_dir=session_dir / f"chunks_{chunk_duration}",
+                video_path=video_path,
+            ))
+            print(f"[Discovery] Found video-only session: {session_dir.name} (video: {video_path.name})")
+        else:
+            print(f"[Discovery] Skipping {session_dir.name}: no video files found")
+
+    return configs
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Process session recordings with VLM labeling (supports multiple sessions and parallelization)"
     )
 
-    # Session input - now supports both single session and multiple sessions
+    # Session input
     session_group = p.add_mutually_exclusive_group(required=True)
     session_group.add_argument(
         "--session",
         type=Path,
-        help="Path to single session folder (contains screenshots/ and aggregations.jsonl)"
+        help="Path to single session folder"
     )
     session_group.add_argument(
         "--sessions-root",
@@ -85,6 +139,24 @@ def parse_args():
         type=int,
         default=1,
         help="Frames per second for master video"
+    )
+
+    # Video-only mode
+    p.add_argument(
+        "--video-only",
+        action="store_true",
+        help="Process sessions containing only video files (no aggregation logs)"
+    )
+    p.add_argument(
+        "--video-only-prompt",
+        default="prompts/video_only_prompt.txt",
+        help="Prompt file to use for video-only mode"
+    )
+    p.add_argument(
+        "--video-extensions",
+        nargs="+",
+        default=[".mp4", ".avi", ".mov", ".mkv"],
+        help="Video file extensions to look for in video-only mode"
     )
 
     # VLM client selection
@@ -146,11 +218,11 @@ def parse_args():
         help="Timeout for vLLM server startup (seconds)"
     )
 
-    # Video options
+    # Video options (for standard mode)
     p.add_argument(
         "--label-video",
         action="store_true",
-        help="Annotate video frames with mouse movements and clicks"
+        help="Annotate video frames with mouse movements and clicks (standard mode only)"
     )
 
     return p.parse_args()
@@ -159,26 +231,61 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Discover sessions
+    # Discover sessions based on mode
     if args.session:
         # Single session mode
-        session_configs = [SessionConfig(
-            session_folder=args.session,
-            agg_jsonl=args.session / args.agg_jsonl,
-            out_chunks_dir=args.session / f"chunks_{args.chunk_duration}",
-        )]
-        print(f"[Main] Processing single session: {args.session.name}")
+        if args.video_only:
+            # Find video file in session
+            video_files = [
+                f for f in args.session.iterdir()
+                if f.is_file() and f.suffix.lower() in tuple(args.video_extensions)
+            ]
+            video_subdir = args.session / "video"
+            if video_subdir.exists():
+                video_files.extend([
+                    f for f in video_subdir.iterdir()
+                    if f.is_file() and f.suffix.lower() in tuple(args.video_extensions)
+                ])
+
+            if not video_files:
+                raise RuntimeError(f"No video files found in {args.session}")
+
+            session_configs = [SessionConfig(
+                session_folder=args.session,
+                agg_jsonl=None,
+                out_chunks_dir=args.session / f"chunks_{args.chunk_duration}",
+                video_path=video_files[0],
+            )]
+            print(f"[Main] Processing single video-only session: {args.session.name}")
+        else:
+            session_configs = [SessionConfig(
+                session_folder=args.session,
+                agg_jsonl=args.session / args.agg_jsonl,
+                out_chunks_dir=args.session / f"chunks_{args.chunk_duration}",
+            )]
+            print(f"[Main] Processing single session: {args.session.name}")
     else:
         # Multiple sessions mode
-        session_configs = discover_sessions(args.sessions_root, args.agg_jsonl, args.chunk_duration)
+        if args.video_only:
+            session_configs = discover_video_only_sessions(
+                args.sessions_root,
+                args.chunk_duration,
+                tuple(args.video_extensions)
+            )
+        else:
+            session_configs = discover_sessions(
+                args.sessions_root,
+                args.agg_jsonl,
+                args.chunk_duration
+            )
+
         if not session_configs:
             print(f"[Main] No valid sessions found in {args.sessions_root}")
             return
         print(f"[Main] Found {len(session_configs)} valid sessions")
 
-    # Update output directories with correct chunk duration
+    # Create output directories
     for config in session_configs:
-        config.out_chunks_dir = config.session_folder / f"chunks_{args.chunk_duration}"
         config.out_chunks_dir.mkdir(parents=True, exist_ok=True)
 
     # Process based on client type
@@ -194,13 +301,15 @@ def main():
             prompt_client=client,
             num_workers=args.num_workers,
             use_batching=False,
+            video_only_mode=args.video_only,
+            video_only_prompt_file=args.video_only_prompt,
         )
 
         results = processor.process_multiple_sessions(
             session_configs,
             chunk_duration=args.chunk_duration,
             fps=args.fps,
-            label_video=args.label_video,
+            label_video=args.label_video if not args.video_only else False,
         )
 
         print(f"[Main] Processed {len(results)} sessions successfully")
@@ -226,13 +335,15 @@ def main():
                 prompt_client=client,
                 batch_size=args.batch_size,
                 use_batching=True,
+                video_only_mode=args.video_only,
+                video_only_prompt_file=args.video_only_prompt,
             )
 
             results = processor.process_multiple_sessions(
                 session_configs,
                 chunk_duration=args.chunk_duration,
                 fps=args.fps,
-                label_video=args.label_video,
+                label_video=args.label_video if not args.video_only else False,
             )
 
             print(f"[Main] Processed {len(results)} sessions successfully")
