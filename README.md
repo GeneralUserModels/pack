@@ -17,7 +17,7 @@
 ## Install
 
 ```shell
-https://github.com/GeneralUserModels/pack.git  # Clone repo
+git clone https://github.com/GeneralUserModels/pack.git  # Clone repo
 cd pack
 uv sync --python 3.12.7  # Install dependencies
 cp .env.example .env  #  Optionally add your Gemini API key here
