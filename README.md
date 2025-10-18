@@ -82,7 +82,7 @@ Below are the flags for each command (concise, non-code descriptions).
 * `--video-only-prompt` — prompt file for video-only mode. **Default:** `prompts/video_only_prompt.txt`
 * `--video-extensions` — recognized video extensions. **Default:** `[".mp4", ".avi", ".mov", ".mkv"]`
 * `--label-video` — annotate video frames (flag).
-* `--skip-excisting` — skip sessions that already have `matched_captions.jsonl` (flag).
+* `--skip-existing` — skip sessions that already have `matched_captions.jsonl` (flag).
 
 ### Visualization
 

@@ -33,7 +33,7 @@ def discover_sessions(
 
         if not (screenshots_dir.exists() and agg_path.exists()):
             continue
-        if session_dir / "matched_captions.jsonl".exists() and skip_existing:
+        if skip_existing and (session_dir / "matched_captions.jsonl").exists():
             print(f"[Discovery] Skipping {session_dir.name}: already processed")
             continue
 

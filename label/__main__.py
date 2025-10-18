@@ -30,7 +30,7 @@ def parse_args():
     p.add_argument("--video-only-prompt", default="prompts/video_only_prompt.txt")
     p.add_argument("--video-extensions", nargs="+", default=[".mp4", ".avi", ".mov", ".mkv"])
     p.add_argument("--label-video", action="store_true", help="Annotate video frames")
-    p.add_argument("--skip-excisting", action="store_true", help="Skip already processed sessions")
+    p.add_argument("--skip-existing", action="store_true", help="Skip already processed sessions")
 
     # Visualization
     p.add_argument("--visualize-session", action="store_true",
@@ -85,7 +85,8 @@ def setup_session_configs(args):
             configs = discover_sessions(
                 args.sessions_root,
                 args.agg_jsonl,
-                args.chunk_duration
+                args.chunk_duration,
+                skip_existing=args.skip_existing,
             )
 
         if not configs:
@@ -106,7 +107,6 @@ def process_with_gemini(args, session_configs):
     client = create_client(
         'gemini',
         model_name=args.model_id,
-        skip_excisting=args.skip_excisting,
     )
 
     processor = SessionProcessor(
