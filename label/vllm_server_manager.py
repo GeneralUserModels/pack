@@ -32,7 +32,7 @@ class VLLMServerManager:
         # Register cleanup on exit
         atexit.register(self.stop)
 
-    def start(self, wait_for_ready: bool = True, timeout: int = 300):
+    def start(self, wait_for_ready: bool = True, timeout: int = 1200):
         """Start the vLLM server."""
         if self.process is not None:
             print("[VLLMServer] Server already running")

@@ -1,287 +1,246 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import List
 import argparse
-import json
-import math
 import os
-import re
 from pathlib import Path
 from dotenv import load_dotenv
 
-from label.clients import PromptClient, GeminiPromptClient, Qwen3VLPromptClient
-from label.video import (
-    create_video_from_images,
-    split_video,
-    compute_max_image_size
-)
-from record.models import ProcessedAggregation, AggregationRequest
+from label.clients import GeminiPromptClient, Qwen3VLPromptClient
+from label.vllm_server_manager import VLLMServerManager
+from label.session_processor import SessionProcessor, SessionConfig
 
 load_dotenv()
 
 
-def list_screenshots(session_folder: Path) -> List[Path]:
-    """List all screenshot files in the session folder."""
-    screenshots = []
-    for p in sorted((session_folder / "screenshots").iterdir()):
-        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}:
-            screenshots.append(p)
-    return screenshots
+def discover_sessions(sessions_root: Path, agg_filename: str = "aggregations.jsonl", chunk_duration: int = 60) -> List[SessionConfig]:
+    configs = []
 
+    if not sessions_root.exists():
+        raise RuntimeError(f"Sessions root directory not found: {sessions_root}")
 
-_timestamp_re = re.compile(r"(\d+\.\d+)")
+    for session_dir in sorted(sessions_root.iterdir()):
+        if not session_dir.is_dir():
+            continue
 
+        screenshots_dir = session_dir / "screenshots"
+        agg_path = session_dir / agg_filename
 
-def extract_timestamp_from_filename(p: Path) -> Optional[float]:
-    """Extract timestamp from filename or use file modification time."""
-    m = _timestamp_re.search(p.name)
-    if m:
-        try:
-            return float(m.group(1))
-        except Exception:
-            return None
-    try:
-        return p.stat().st_mtime
-    except Exception:
-        return None
-
-
-def load_aggregations_jsonl(path: Path) -> List[ProcessedAggregation]:
-    """Load aggregations from a JSONL file."""
-    out = []
-    with open(path, 'r') as f:
-        for raw_line in f:
-            try:
-                line = json.loads(raw_line.strip())
-            except Exception:
-                print("Skipping invalid json line")
-                continue
-
-            r = AggregationRequest(
-                timestamp=line['timestamp'],
-                end_timestamp=None,
-                reason=line['reason'],
-                event_type=line['event_type'],
-                is_start=line['is_start'],
-                screenshot=None,
-                screenshot_path=line['screenshot_path'],
-                monitor=line.get('monitor'),
-                burst_id=line.get('burst_id'),
+        if screenshots_dir.exists() and agg_path.exists():
+            has_images = any(
+                p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+                for p in screenshots_dir.iterdir()
             )
-            events = line['events']
-            out.append(ProcessedAggregation(request=r, events=events))
-    return out
 
-
-def chunk_aggregations(
-    aggs: List[ProcessedAggregation],
-    chunk_start: float,
-    chunk_duration: int
-) -> List[List[ProcessedAggregation]]:
-    """Partition aggregations into time-based chunks."""
-    if not aggs:
-        return []
-    min_ts = min(a.request.timestamp for a in aggs)
-    max_ts = max(a.request.timestamp for a in aggs)
-    if chunk_start is None:
-        chunk_start = min_ts
-    num_chunks = max(1, math.ceil((max_ts - chunk_start) / float(chunk_duration)))
-    chunks: List[List[ProcessedAggregation]] = [[] for _ in range(num_chunks)]
-    for a in aggs:
-        idx = int(math.floor((a.request.timestamp - chunk_start) / float(chunk_duration)))
-        if idx < 0:
-            idx = 0
-        if idx >= len(chunks):
-            extend_by = idx - len(chunks) + 1
-            chunks.extend([[] for _ in range(extend_by)])
-        chunks[idx].append(a)
-    return chunks
-
-
-def process_session(
-    session_folder: Path,
-    agg_jsonl: Path,
-    out_chunks_dir: Path,
-    chunk_duration: int = 180,
-    fps: int = 1,
-    prompt_client: PromptClient = None,
-    use_existing_video: Optional[Path] = None,
-    label_video: bool = False,
-):
-    """Main orchestration:
-    - Reads screenshots from session_folder/screenshots
-    - Builds a full video showing each screenshot for 1s
-    - Splits into chunks
-    - Loads aggregations.jsonl and chunk them according to epoch time windows
-    - For each chunk: upload video chunk and send prompt built from aggregations
-    - Save aggregations and generation results in separate files
-    """
-    screenshots = list_screenshots(session_folder)
-    if not screenshots:
-        raise RuntimeError("No screenshots found in session folder")
-
-    images_and_ts = [(p, extract_timestamp_from_filename(p)) for p in screenshots]
-    images_and_ts = [it for it in images_and_ts if it[1] is not None]
-    images_and_ts.sort(key=lambda x: x[1])
-
-    global_start = images_and_ts[0][1]
-
-    master_video = out_chunks_dir / "full_session.mp4"
-    pad_to = compute_max_image_size([p for p, _ in images_and_ts])
-    image_paths = [p for p, _ in images_and_ts]
-
-    if use_existing_video and use_existing_video.exists():
-        print(f"Using existing video: {use_existing_video}")
-        master_video = use_existing_video
-    else:
-        print(f"Creating master video with {len(image_paths)} images; pad_to={pad_to}")
-        aggs = load_aggregations_jsonl(agg_jsonl)
-        create_video_from_images(
-            image_paths,
-            master_video,
-            fps=fps,
-            pad_to=pad_to,
-            label_video=label_video,
-            aggregations=aggs if label_video else None
-        )
-
-    chunks_dir = out_chunks_dir / "video_chunks"
-    video_chunks = split_video(master_video, chunk_duration, chunks_dir)
-
-    aggs = load_aggregations_jsonl(agg_jsonl)
-    agg_chunks = chunk_aggregations(aggs, chunk_start=global_start, chunk_duration=chunk_duration)
-
-    results = []
-    for i, vpath in enumerate(video_chunks):
-        print(f"Processing chunk {i} -> {vpath}")
-        chunk_out_dir = out_chunks_dir / f"chunk_{i:03d}"
-        chunk_out_dir.mkdir(parents=True, exist_ok=True)
-        this_aggs = agg_chunks[i] if i < len(agg_chunks) else []
-
-        prompts = []
-        for j, a in enumerate(this_aggs):
-            mss = f"{j // 60:02}:{j % 60:02}"
-            prompts.append(a.to_prompt(mss))
-        full_prompt = "".join(prompts)
-        with open(Path(__file__).parent / "prompt.txt", 'r') as f:
-            prompt_template = f.read()
-        full_prompt = prompt_template.replace("{{LOGS}}", full_prompt)
-
-        # Save aggregations separately
-        agg_output = chunk_out_dir / "aggregations.json"
-        with open(agg_output, 'w') as f:
-            json.dump([a.to_dict() for a in this_aggs], f, indent=2, ensure_ascii=False)
-
-        file_descriptor = None
-        if prompt_client is not None:
-            try:
-                file_descriptor = prompt_client.upload_file(str(vpath))
-            except Exception as e:
-                print(f"Warning: upload failed for chunk {i}: {e}")
-                file_descriptor = None
-
-        saved_resp = None
-        if prompt_client is not None:
-            try:
-                resp = prompt_client.generate_content(
-                    full_prompt,
-                    file_descriptor=file_descriptor,
-                    response_mime_type="application/json"
-                )
-                if hasattr(resp, 'json'):
-                    try:
-                        body = resp.json
-                        if callable(body):
-                            body = body()
-                    except Exception:
-                        body = None
-                else:
-                    try:
-                        body = json.loads(getattr(resp, 'text', str(resp)))
-                    except Exception:
-                        body = getattr(resp, 'text', str(resp))
-                saved_resp = body
-            except Exception as e:
-                print(f"Model call failed for chunk {i}: {e}")
-                saved_resp = {"error": str(e)}
+            if has_images:
+                configs.append(SessionConfig(
+                    session_folder=session_dir,
+                    agg_jsonl=agg_path,
+                    out_chunks_dir=session_dir / f"chunks_{chunk_duration}",
+                ))
+                print(f"[Discovery] Found session: {session_dir.name}")
+            else:
+                print(f"[Discovery] Skipping {session_dir.name}: no images in screenshots/")
         else:
-            print("No prompt client configured; skipping model call")
+            missing = []
+            if not screenshots_dir.exists():
+                missing.append("screenshots/")
+            if not agg_path.exists():
+                missing.append(agg_filename)
+            print(f"[Discovery] Skipping {session_dir.name}: missing {', '.join(missing)}")
 
-        # Save generation result separately
-        result_output = chunk_out_dir / "generation_result.json"
-        with open(result_output, 'w') as f:
-            json.dump({
-                "chunk_index": i,
-                "video_chunk": str(vpath),
-                "aggregations_count": len(this_aggs),
-                "result": saved_resp,
-            }, f, indent=2, ensure_ascii=False)
-
-        # Save prompt for reference
-        prompt_output = chunk_out_dir / "prompt.txt"
-        with open(prompt_output, 'w') as f:
-            f.write(full_prompt)
-
-        results.append({
-            "chunk_index": i,
-            "video_chunk": str(vpath),
-            "aggregations_count": len(this_aggs),
-            "aggregations_file": str(agg_output),
-            "result_file": str(result_output),
-            "prompt_file": str(prompt_output),
-        })
-
-    with open(out_chunks_dir / "all_chunks_summary.json", 'w') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"Done. Results saved to {out_chunks_dir}")
-    return results
+    return configs
 
 
 def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--session", required=True,
-                   help="Path to session folder (contains screenshots/ and aggregations.jsonl)")
-    p.add_argument("--agg-jsonl", default="aggregations.jsonl",
-                   help="Filename of aggregations jsonl inside session folder")
-    p.add_argument("--chunk-duration", type=int, default=60,
-                   help="Chunk duration in seconds")
-    p.add_argument("--fps", type=int, default=1,
-                   help="Frames per second for master video")
-    p.add_argument("--prompt-client", choices=["gemini", "qwen3vl", "local"],
-                   default="gemini")
-    p.add_argument("--qwen-model-path", default="Qwen/Qwen3-VL-30B-A3B-Instruct",
-                   help="Path to Qwen3-VL model")
-    p.add_argument("--label-video", action="store_true",
-                   help="Annotate video frames with mouse movements and clicks")
+    p = argparse.ArgumentParser(
+        description="Process session recordings with VLM labeling (supports multiple sessions and parallelization)"
+    )
+
+    # Session input - now supports both single session and multiple sessions
+    session_group = p.add_mutually_exclusive_group(required=True)
+    session_group.add_argument(
+        "--session",
+        type=Path,
+        help="Path to single session folder (contains screenshots/ and aggregations.jsonl)"
+    )
+    session_group.add_argument(
+        "--sessions-root",
+        type=Path,
+        help="Path to directory containing multiple session folders"
+    )
+
+    p.add_argument(
+        "--agg-jsonl",
+        default="aggregations.jsonl",
+        help="Filename of aggregations jsonl inside session folder(s)"
+    )
+    p.add_argument(
+        "--chunk-duration",
+        type=int,
+        default=60,
+        help="Chunk duration in seconds"
+    )
+    p.add_argument(
+        "--fps",
+        type=int,
+        default=1,
+        help="Frames per second for master video"
+    )
+
+    # VLM client selection
+    p.add_argument(
+        "--prompt-client",
+        choices=["gemini", "qwen3vl"],
+        default="gemini",
+        help="Which VLM client to use"
+    )
+
+    # Parallelization options
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Number of concurrent workers for Gemini API calls"
+    )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Batch size for vLLM batch processing"
+    )
+
+    # Qwen3VL options
+    p.add_argument(
+        "--qwen-model-path",
+        default="Qwen/Qwen3-VL-8B-Thinking-FP8",
+        help="Qwen model path or HuggingFace ID"
+    )
+    p.add_argument(
+        "--vllm-port",
+        type=int,
+        default=8000,
+        help="Port for vLLM server"
+    )
+    p.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Number of GPUs for tensor parallelism"
+    )
+    p.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=0.9,
+        help="GPU memory utilization (0.0-1.0)"
+    )
+    p.add_argument(
+        "--max-model-len",
+        type=int,
+        default=None,
+        help="Maximum model context length"
+    )
+    p.add_argument(
+        "--server-startup-timeout",
+        type=int,
+        default=600,
+        help="Timeout for vLLM server startup (seconds)"
+    )
+
+    # Video options
+    p.add_argument(
+        "--label-video",
+        action="store_true",
+        help="Annotate video frames with mouse movements and clicks"
+    )
+
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    session = Path(args.session)
-    agg_path = session / args.agg_jsonl
-    out = session / f"chunks_{args.chunk_duration}"
-    out.mkdir(parents=True, exist_ok=True)
 
+    # Discover sessions
+    if args.session:
+        # Single session mode
+        session_configs = [SessionConfig(
+            session_folder=args.session,
+            agg_jsonl=args.session / args.agg_jsonl,
+            out_chunks_dir=args.session / f"chunks_{args.chunk_duration}",
+        )]
+        print(f"[Main] Processing single session: {args.session.name}")
+    else:
+        # Multiple sessions mode
+        session_configs = discover_sessions(args.sessions_root, args.agg_jsonl, args.chunk_duration)
+        if not session_configs:
+            print(f"[Main] No valid sessions found in {args.sessions_root}")
+            return
+        print(f"[Main] Found {len(session_configs)} valid sessions")
+
+    # Update output directories with correct chunk duration
+    for config in session_configs:
+        config.out_chunks_dir = config.session_folder / f"chunks_{args.chunk_duration}"
+        config.out_chunks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Process based on client type
     if args.prompt_client == 'gemini':
         api_key = os.environ.get('GEMINI_API_KEY')
         if api_key is None:
-            raise RuntimeError('GEMINI_API_KEY environment variable not set (required for Gemini client)')
-    client = None
+            raise RuntimeError('GEMINI_API_KEY environment variable not set')
 
-    if args.prompt_client == 'gemini':
+        print(f"[Main] Using Gemini client with {args.num_workers} concurrent workers")
         client = GeminiPromptClient(api_key=api_key)
-    elif args.prompt_client == 'qwen3vl':
-        client = Qwen3VLPromptClient(model_path=args.qwen_model_path)
 
-    process_session(
-        session,
-        agg_path,
-        out,
-        chunk_duration=args.chunk_duration,
-        fps=args.fps,
-        prompt_client=client,
-        label_video=args.label_video
-    )
+        processor = SessionProcessor(
+            prompt_client=client,
+            num_workers=args.num_workers,
+            use_batching=False,
+        )
+
+        results = processor.process_multiple_sessions(
+            session_configs,
+            chunk_duration=args.chunk_duration,
+            fps=args.fps,
+            label_video=args.label_video,
+        )
+
+        print(f"[Main] Processed {len(results)} sessions successfully")
+
+    elif args.prompt_client == 'qwen3vl':
+        print(f"[Main] Using Qwen3-VL client with batch size {args.batch_size}")
+
+        with VLLMServerManager(
+            model_path=args.qwen_model_path,
+            port=args.vllm_port,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            max_model_len=args.max_model_len,
+        ) as server:
+            server._wait_for_server(timeout=args.server_startup_timeout)
+
+            client = Qwen3VLPromptClient(
+                base_url=server.get_base_url(),
+                model_name=args.qwen_model_path,
+            )
+
+            processor = SessionProcessor(
+                prompt_client=client,
+                batch_size=args.batch_size,
+                use_batching=True,
+            )
+
+            results = processor.process_multiple_sessions(
+                session_configs,
+                chunk_duration=args.chunk_duration,
+                fps=args.fps,
+                label_video=args.label_video,
+            )
+
+            print(f"[Main] Processed {len(results)} sessions successfully")
+
+        print("[Main] vLLM server stopped automatically")
+
+    else:
+        raise ValueError(f"Unknown prompt client: {args.prompt_client}")
 
 
 if __name__ == '__main__':

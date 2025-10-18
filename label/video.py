@@ -1,7 +1,7 @@
-"""Video generation, annotation, and chunking functionality."""
 from __future__ import annotations
 from typing import List, Optional, Tuple
 import math
+import re
 import shutil
 import subprocess
 import tempfile
@@ -26,6 +26,30 @@ BUTTON_COLORS = {
     'Button.middle': 'green',
     'middle': 'green'
 }
+
+
+def list_screenshots(session_folder: Path) -> List[Path]:
+    """List all screenshot files in the session folder."""
+    screenshots = []
+    for p in sorted((session_folder / "screenshots").iterdir()):
+        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+            screenshots.append(p)
+    return screenshots
+
+
+def extract_timestamp_from_filename(p: Path) -> Optional[float]:
+    """Extract timestamp from filename or use file modification time."""
+    _timestamp_re = re.compile(r"(\d+\.\d+)")
+    m = _timestamp_re.search(p.name)
+    if m:
+        try:
+            return float(m.group(1))
+        except Exception:
+            return None
+    try:
+        return p.stat().st_mtime
+    except Exception:
+        return None
 
 
 def compute_max_image_size(images: Iterable[Path]) -> Tuple[int, int]:
@@ -177,8 +201,7 @@ def draw_clicks(img: Image.Image, click_positions, monitor, marker_radius: int,
 def annotate_image(img: Image.Image, events, monitor, scale=1.0, x_offset=0, y_offset=0) -> Image.Image:
     """Annotate image with cursor movements and clicks."""
     movements = get_cursor_movements(events)
-    print(movements)
-    for movement in movements:
+    for movement in [movements[0], movements[-1]] if len(movements) >= 2 else movements:
         img = draw_cursor_arrow(img, movement['start'], movement['end'], monitor,
                                 'orange', scale, x_offset, y_offset)
 

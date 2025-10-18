@@ -102,7 +102,6 @@ class AggregationWorker:
             self.event_queue.all_events = events_to_keep
 
         serialized = [e.to_dict() for e in events_to_process]
-        print(f"  - Collected {len(serialized)} events between {start_screenshot_timestamp:.3f} and {end_screenshot_timestamp:.3f}")
 
         return serialized
 
