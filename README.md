@@ -35,78 +35,76 @@ Two main entry points:
 * **Label / process a session** — aggregate events, run VLM labeling, optionally create annotated videos
   `uv run -m label`
 
-Below are the flags for each command (concise, non-code descriptions).
-
 ---
 
 ## `uv run -m record` — Record a session
 
-**What it does:** records screen activity and user input events into a session folder.
+**What it does:** Records screen activity and user input events into a session folder.
 
 **Flags**
 
-* `-f, --fps` — frames per second to capture. **Type:** int — **Default:** `16`
-* `-s, --buffer-seconds` — seconds to keep in the in-memory cyclic buffer. **Type:** int — **Default:** `12`
-* `-b, --buffer-all-images` — save all buffered images to disk (flag). **Default:** off
-* `-m, --monitor` — enable real-time monitoring of the last session (flag). **Default:** off
-* `-r, --max-res` — maximal resolution for screenshots: provide `width height`. **Default:** no scaling
-
-**Record output (per session folder, saved under `logs/`)**
-
-* `screenshots/` — captured frames
-* `buffer_imgs/` — exported buffer images (if `--buffer-all-images`)
-* `aggregations.jsonl` — aggregated event bursts
-* `events.jsonl` — all raw input events
-* `screenshots.jsonl` — screenshot metadata
+| Flag                             | Type                 | Default    | Description                                     |
+| -------------------------------- | -------------------- | ---------- | ----------------------------------------------- |
+| `-f, --fps`                      | int                  | `16`       | Frames per second to capture                    |
+| `-s, --buffer-seconds`           | int                  | `12`       | Seconds to keep in buffer                       |
+| `-b, --buffer-all-images`        | flag                 | off        | Save all buffer images to disk                  |
+| `-m, --monitor`                  | flag                 | off        | Enable real-time monitoring of the last session |
+| `-r, --max-res <width> <height>` | int int              | none       | Maximal resolution for screenshots              |
+| `-p, --precision`                | `accurate` / `rough` | `accurate` | Precision level for event aggregation           |
 
 ---
 
-## `uv run -m label` — Label a recorded session (VLM)
+## `uv run -m label` — Label / process a session
 
-**What it does:** loads recorded sessions (or raw video), chunks and formats them, runs VLM labeling to produce captions, and optionally renders annotated videos.
+**What it does:** Loads recorded sessions or raw video, chunks and formats them, runs VLM labeling, and optionally renders annotated videos.
 
-### Session selection (mutually exclusive)
+### Session selection (required)
 
-* `--session <PATH>` — single session folder.
-* `--sessions-root <PATH>` — process all session folders under this root.
+* `--session <PATH>` — single session folder
+* `--sessions-root <PATH>` — process all sessions under this root
 
-### Session processing options
+### Processing options
 
-* `--agg-jsonl` — aggregation filename to read/write. **Default:** `aggregations.jsonl`
-* `--chunk-duration` — chunk duration in seconds for processing. **Type:** int — **Default:** `60`
-* `--fps` — FPS for sampling frames during labeling. **Type:** int — **Default:** `1`
+| Flag               | Type | Default | Description                     |
+| ------------------ | ---- | ------- | ------------------------------- |
+| `--chunk-duration` | int  | `60`    | Chunk duration in seconds       |
+| `--fps`            | int  | `1`     | Frame sampling rate             |
+| `--skip-existing`  | flag | off     | Skip already processed sessions |
 
-### Video-only / video handling
+### Video-only mode
 
-* `--video-only` — process video files without input logs (flag).
-* `--video-only-prompt` — prompt file for video-only mode. **Default:** `prompts/video_only_prompt.txt`
-* `--video-extensions` — recognized video extensions. **Default:** `[".mp4", ".avi", ".mov", ".mkv"]`
-* `--label-video` — annotate video frames (flag).
-* `--skip-existing` — skip sessions that already have `matched_captions.jsonl` (flag).
+| Flag                               | Description                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--video-only`                     | Process video files without screenshots or annotations                                                |
+| `--video-extensions .mp4 .avi ...` | Recognized video extensions                                                                           |
+| `--prompt-file`                    | Custom prompt file (defaults to `prompts/video_only.txt` in video-only mode or `prompts/default.txt`) |
 
-### Visualization
+### Visualization & annotations
 
-* `--visualize-session` — produce an annotated video with captions and events (`annotated_session.mp4`).
+| Flag          | Description                                                     |
+| ------------- | --------------------------------------------------------------- |
+| `--annotate`  | Overlay cursor and click markers (only for standard processing) |
+| `--visualize` | Create annotated video visualizations                           |
 
-### VLM client & model selection
+### VLM client
 
-* `--client` — VLM backend: `gemini` or `qwen3vl`. **Default:** `gemini`
-* `--model-id` — model path or ID to use.
+| Flag                     | Default                                                             |
+| ------------------------ | ------------------------------------------------------------------- |
+| `--client gemini / vllm` | `gemini`                                                            |
+| `--model`                | auto-selects: `gemini-2.5-flash` or `Qwen/Qwen3-VL-8B-Thinking-FP8` |
+| `--num-workers`          | `4`                                                                 |
 
-### Parallelization / performance
+### vLLM backend options
 
-* `--num-workers` — concurrent workers (Gemini). **Type:** int — **Default:** `4`
-* `--batch-size` — batch size for Qwen3VL inference. **Type:** int — **Default:** `8`
-
-### Qwen3VL server options (when using `qwen3vl`)
-
-* `--vllm-url` — use an existing vLLM server (e.g. `http://localhost:8000`) instead of launching one.
-* `--vllm-port` — port when starting a new vLLM server. **Default:** `8000`
-* `--tensor-parallel-size` — tensor parallelism (GPUs/shards). **Default:** `1`
-* `--gpu-memory-utilization` — fraction of GPU memory to reserve for the server. **Default:** `0.9`
-* `--max-model-len` — max token length for the model.
-* `--server-startup-timeout` — seconds to wait for server startup. **Default:** `600`
-* `--enable-expert-parallel` — enable MoE expert-parallel mode (flag).
+| Flag                | Default | Description                |
+| ------------------- | ------- | -------------------------- |
+| `--vllm-url`        | none    | Use existing vLLM server   |
+| `--vllm-port`       | `8000`  | Port for auto-spawned vLLM |
+| `--tensor-parallel` | `1`     | Parallel shards            |
+| `--gpu-memory`      | `0.9`   | Fraction of GPU reserved   |
+| `--max-model-len`   | —       | Max token length           |
+| `--expert-parallel` | flag    | Enable MoE expert parallel |
+| `--startup-timeout` | `600`   | Timeout for server startup |
 
 ---
 
@@ -118,9 +116,9 @@ Gemini + annotated video:
 uv run -m label \
   --session logs/session_xyz \
   --client gemini \
-  --model-id gemini-2.5-pro \
-  --label-video \
-  --visualize-session
+  --model gemini-2.5-flash \
+  --annotate \
+  --visualize
 ```
 
 Process all sessions in a folder:
@@ -129,30 +127,18 @@ Process all sessions in a folder:
 uv run -m label \
   --sessions-root logs/ \
   --client gemini \
-  --label-video
+  --annotate
 ```
 
-Video-only labeling with Qwen3VL on 4 GPUs:
+Video-only labeling with vLLM on 4 GPUs:
 
 ```bash
 uv run -m label \
   --session path_with_video \
-  --label-video \
-  --client qwen3vl \
-  --model-id Qwen/Qwen3-VL-8B-Thinking-FP8 \
   --video-only \
-  --tensor-parallel-size 4
-```
-
-Launch a Qwen vLLM instance automatically (example):
-
-```bash
-uv run -m label \
-  --session logs/session_xyz \
-  --client qwen3vl \
-  --model-id Qwen/Qwen3-VL-8B-Thinking-FP8 \
-  --label-video \
-  --tensor-parallel-size 4
+  --client vllm \
+  --model Qwen/Qwen3-VL-8B-Thinking-FP8 \
+  --tensor-parallel 4
 ```
 
 Use an existing vLLM server:
@@ -160,18 +146,16 @@ Use an existing vLLM server:
 ```bash
 uv run -m label \
   --session logs/session_xyz \
-  --label-video \
-  --client qwen3vl \
+  --client vllm \
   --vllm-url http://127.0.0.1:8000
 ```
-
 ---
 
 ## Label output (per processed session)
 
 * Screenshot video and chunks
 * `captions.jsonl` and caption chunk files — VLM-generated action captions with relative timestamps
-* `matched_captions.jsonl` — captions matched to screenshots with recorded timestamps and input events
+* `data.jsonl` — captions matched to screenshots with recorded timestamps and input events. The main output of the labeling step.
 * `annotated_session.mp4` — annotated video (when `--visualize-session` is used)
 
 ---
@@ -208,7 +192,7 @@ The `label` module:
 
 * Loads sessions or raw video, chunks them and their logs, and prepares inputs for the VLM.
 * Uses prompts (in `label/prompts`) to instruct the VLM to generate captions that describe the user’s actions and context.
-* Produces `captions.jsonl` and `matched_captions.jsonl` (captions aligned to screenshots and events).
+* Produces `captions.jsonl` and `data.jsonl` (captions aligned to screenshots and events).
 * Optionally renders an annotated video (`annotated_session.mp4`) showing captions and event visualizations overlayed on frames.
 
 The label step performs a second layer of aggregation: it uses the bursts detected at recording time and further refines and annotates them with VLM outputs to create final human-readable summaries.

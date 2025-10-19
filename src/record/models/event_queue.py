@@ -7,7 +7,7 @@ from typing import Callable, Optional, Dict, Any
 from collections import deque
 from record.models.event import InputEvent, EventType
 from record.models.aggregation import AggregationConfig, AggregationRequest
-from record.constants import Constants
+from record.constants import constants_manager
 
 
 class EventQueue:
@@ -273,15 +273,17 @@ class EventQueue:
 
     def _find_screenshot_before(self, timestamp: float) -> Optional[Any]:
         """Find screenshot before timestamp (for start events)."""
+        constants = constants_manager.get()
         candidates = self.image_queue.get_entries_before(
-            timestamp, milliseconds=Constants.PADDING_BEFORE
+            timestamp, milliseconds=constants.PADDING_BEFORE
         )
         return candidates[-1]
 
     def _find_screenshot_after(self, timestamp: float) -> Optional[Any]:
         """Find screenshot after timestamp (for end events and split points)."""
+        constants = constants_manager.get()
         candidates = self.image_queue.get_entries_after(
-            timestamp, milliseconds=Constants.PADDING_AFTER
+            timestamp, milliseconds=constants.PADDING_AFTER
         )
         return candidates[0]
 

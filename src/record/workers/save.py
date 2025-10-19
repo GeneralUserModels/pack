@@ -17,12 +17,13 @@ class SaveWorker:
         """
         self.session_dir = Path(session_dir)
         self.screenshots_dir = self.session_dir / "screenshots"
-        self.buffer_imgs_dir = self.session_dir / "buffer_imgs"
         self.buffer_all = buffer_all
+        if buffer_all:
+            self.buffer_imgs_dir = self.session_dir / "buffer_imgs"
+            self.buffer_imgs_dir.mkdir(exist_ok=True)
 
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.screenshots_dir.mkdir(exist_ok=True)
-        self.buffer_imgs_dir.mkdir(exist_ok=True)
 
         self.input_log = self.session_dir / "input_events.jsonl"
         self.screenshot_log = self.session_dir / "screenshots.jsonl"
