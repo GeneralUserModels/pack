@@ -56,7 +56,7 @@ MAX_TOTAL_THRESHOLD = max(
 )
 
 
-def sync_constants(new_constants: ConstantsSpec):
+def sync_constants():
     _default = os.getenv("CAPTURE_PRECISION", "accurate").lower()
     global CONSTANTS
     CONSTANTS = _ROUGH if _default == "rough" else _ACCURATE

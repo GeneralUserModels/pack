@@ -66,6 +66,9 @@ class EventDetails:
     def is_double_click(self) -> bool:
         return self.data.get('double_click', False)
 
+    def to_dict(self) -> Dict[str, Any]:
+        return self.data
+
 
 @dataclass
 class Event:
@@ -84,6 +87,15 @@ class Event:
             details=EventDetails(data.get('details', {})),
             monitor=data.get('monitor')
         )
+
+    def to_dict(self) -> Dict:
+        return {
+            'event_type': self.event_type,
+            'timestamp': self.timestamp,
+            'cursor_position': self.cursor_position,
+            'details': self.details.to_dict(),
+            'monitor': self.monitor
+        }
 
     @property
     def is_mouse_event(self) -> bool:
@@ -137,7 +149,7 @@ class Aggregation:
             'event_type': self.event_type,
             'is_start': self.is_start,
             'screenshot_path': self.screenshot_path,
-            'events': [e.__dict__ for e in self.events],
+            'events': [e.to_dict() for e in self.events],
             'monitor': self.monitor,
             'burst_id': self.burst_id
         }
@@ -214,7 +226,7 @@ class MatchedCaption:
             'end_index': self.end_index,
             'img': self.image_path,
             'caption': self.caption.text,
-            'raw_events': [e.__dict__ for e in self.all_events],
+            'raw_events': [e.to_dict() for e in self.all_events],
             'num_aggregations': len(self.aggregations),
             'start_formatted': self.caption.start_formatted,
             'end_formatted': self.caption.end_formatted,
@@ -269,7 +281,7 @@ class SessionConfig:
 
     @property
     def matched_captions_jsonl(self) -> Path:
-        return self.session_folder / "matched_captions.jsonl"
+        return self.session_folder / "data.jsonl"
 
     def ensure_dirs(self):
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
