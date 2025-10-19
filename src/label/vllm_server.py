@@ -39,6 +39,7 @@ class VLLMServer:
 
         if self.expert_parallel:
             cmd.append("--enable-expert-parallel")
+        print("Starting vLLM server with command:", " ".join(cmd))
 
         if self.max_model_len:
             cmd.extend(["--max-model-len", str(self.max_model_len)])

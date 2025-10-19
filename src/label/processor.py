@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from label.models import SessionConfig, ChunkTask, Caption, Aggregation, VideoPath, MatchedCaption
 from label.video import create_video, split_video, compute_max_size
-from label.clients import VLMClient
+from label.clients import VLMClient, CAPTION_SCHEMA
 
 
 class Processor:
@@ -17,13 +17,17 @@ class Processor:
         client: VLMClient,
         num_workers: int = 4,
         video_only: bool = False,
-        prompt_file: str = "prompts/default.txt"
+        prompt_file: str = "prompts/default.txt",
+        batch_size: int = 8,
+        use_batching: bool = False
     ):
 
         self.client = client
         self.num_workers = num_workers
         self.video_only = video_only
         self.prompt = self._load_prompt(prompt_file)
+        self.batch_size = batch_size
+        self.use_batching = use_batching
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
@@ -49,7 +53,12 @@ class Processor:
                 tasks.extend(self._prepare_standard(config, fps, annotate))
 
         print(f"[Processor] Processing {len(tasks)} chunks")
-        results = self._process_tasks(tasks)
+        print(f"[Processor] Mode: {'Batching' if self.use_batching else 'Concurrent'}")
+
+        if self.use_batching:
+            results = self._process_with_batching(tasks)
+        else:
+            results = self._process_with_workers(tasks)
 
         return self._save_results(results, configs, fps)
 
@@ -132,12 +141,13 @@ class Processor:
 
         return tasks
 
-    def _process_tasks(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
+    def _process_with_workers(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
+        """Process using concurrent workers (non-batched mode)."""
         results = []
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             future_to_task = {
-                executor.submit(self._process_task, task): task
+                executor.submit(self._process_single_task, task): task
                 for task in tasks
             }
 
@@ -154,10 +164,53 @@ class Processor:
 
         return results
 
-    def _process_task(self, task: ChunkTask) -> any:
+    def _process_with_batching(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
+        """Process using batch generation (vLLM batching)."""
+        results = []
+
+        for i in tqdm(range(0, len(tasks), self.batch_size), desc="Processing batches"):
+            batch = tasks[i:i + self.batch_size]
+
+            prompts = [task.prompt for task in batch]
+            file_descriptors = []
+
+            for task in batch:
+                try:
+                    file_desc = self.client.upload_file(str(task.video_path.resolve()))
+                    file_descriptors.append(file_desc)
+                except Exception as e:
+                    print(f"\n[Warning] Upload failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
+                    file_descriptors.append(None)
+
+            try:
+                responses = self.client.generate(
+                    prompts,
+                    file_descriptor=file_descriptors,
+                    schema=CAPTION_SCHEMA
+                )
+
+                for task, resp in zip(batch, responses):
+                    try:
+                        body = resp.json if not callable(resp.json) else resp.json()
+                        results.append((task, body))
+                    except Exception as e:
+                        print(f"\n[Error] Parse failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
+                        results.append((task, {"error": str(e)}))
+
+            except Exception as e:
+                print(f"\n[Error] Batch processing failed: {e}")
+                for task in batch:
+                    results.append((task, {"error": str(e)}))
+
+        return results
+
+    def _process_single_task(self, task: ChunkTask) -> any:
+        """Process single task with schema."""
         file_desc = self.client.upload_file(str(task.video_path.resolve()))
-        response = self.client.generate(task.prompt, file_desc)
-        return response.json
+        response = self.client.generate(task.prompt, file_desc, schema=CAPTION_SCHEMA)
+
+        result = response.json if not callable(response.json) else response.json()
+        return result
 
     def _save_results(
         self, results: List[Tuple[ChunkTask, any]],
