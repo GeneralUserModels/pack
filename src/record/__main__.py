@@ -1,7 +1,6 @@
 import argparse
 import time
 import signal
-import os
 import sys
 import threading
 from pathlib import Path
@@ -12,7 +11,7 @@ from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer, plot_summary_stats
-from record.constants import CONSTANTS, sync_constants
+from record.constants import constants_manager
 
 
 class ScreenRecorder:
@@ -38,6 +37,7 @@ class ScreenRecorder:
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
         self.max_res = max_res
+        constants = constants_manager.get()
 
         self.image_buffer_size = fps * buffer_seconds
         self.event_buffer_size = fps * buffer_seconds * 30
@@ -53,20 +53,20 @@ class ScreenRecorder:
         self.input_event_queue = EventQueue(
             image_queue=self.image_queue,
             click_config=AggregationConfig(
-                gap_threshold=CONSTANTS.CLICK_GAP_THRESHOLD,
-                total_threshold=CONSTANTS.CLICK_TOTAL_THRESHOLD
+                gap_threshold=constants.CLICK_GAP_THRESHOLD,
+                total_threshold=constants.CLICK_TOTAL_THRESHOLD
             ),
             move_config=AggregationConfig(
-                gap_threshold=CONSTANTS.MOVE_GAP_THRESHOLD,
-                total_threshold=CONSTANTS.MOVE_TOTAL_THRESHOLD
+                gap_threshold=constants.MOVE_GAP_THRESHOLD,
+                total_threshold=constants.MOVE_TOTAL_THRESHOLD
             ),
             scroll_config=AggregationConfig(
-                gap_threshold=CONSTANTS.SCROLL_GAP_THRESHOLD,
-                total_threshold=CONSTANTS.SCROLL_TOTAL_THRESHOLD
+                gap_threshold=constants.SCROLL_GAP_THRESHOLD,
+                total_threshold=constants.SCROLL_TOTAL_THRESHOLD
             ),
             key_config=AggregationConfig(
-                gap_threshold=CONSTANTS.KEY_GAP_THRESHOLD,
-                total_threshold=CONSTANTS.KEY_TOTAL_THRESHOLD
+                gap_threshold=constants.KEY_GAP_THRESHOLD,
+                total_threshold=constants.KEY_TOTAL_THRESHOLD
             ),
             poll_interval=1.0,
             session_dir=self.session_dir
@@ -278,8 +278,9 @@ def main():
     )
 
     args = parser.parse_args()
-    os.environ["CAPTURE_PRECISION"] = args.precision
-    sync_constants()
+
+    from record.constants import constants_manager
+    constants_manager.set_preset(args.precision, verbose=False)
 
     recorder = ScreenRecorder(
         fps=args.fps,
