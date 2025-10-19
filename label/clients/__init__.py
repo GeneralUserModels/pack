@@ -1,12 +1,23 @@
-from label.clients.prompt_client import PromptClient, TASK_SCHEMA
-from label.clients.gemini_client import GeminiPromptClient
-from label.clients.qwen_3_vl_client import Qwen3VLPromptClient
-from label.clients.create import create_client
+from label.clients.client import VLMClient, CAPTION_SCHEMA
+from label.clients.gemini import GeminiClient, GeminiResponse
+from label.clients.vllm import VLLMClient, VLLMResponse
+
+
+def create_client(client_type: str, **kwargs) -> VLMClient:
+    if client_type == 'gemini':
+        return GeminiClient(**kwargs)
+    elif client_type == 'vllm':
+        return VLLMClient(**kwargs)
+    else:
+        raise ValueError(f"Unknown client type: {client_type}")
+
 
 __all__ = [
-    "PromptClient",
-    "GeminiPromptClient",
-    "Qwen3VLPromptClient",
-    "TASK_SCHEMA",
+    "VLMClient",
+    "GeminiClient",
+    "GeminiResponse",
+    "VLLMClient",
+    "VLLMResponse",
+    "CAPTION_SCHEMA",
     "create_client",
 ]
