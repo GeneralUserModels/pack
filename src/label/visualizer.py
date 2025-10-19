@@ -23,7 +23,7 @@ class Visualizer:
         if not output_path:
             output_path = session_dir / "annotated.mp4"
 
-        matched_path = session_dir / "matched_captions.jsonl"
+        matched_path = session_dir / "data.jsonl"
         if not matched_path.exists():
             raise RuntimeError(f"matched_captions.jsonl not found in {session_dir}")
 

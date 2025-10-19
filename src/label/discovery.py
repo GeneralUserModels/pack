@@ -25,7 +25,7 @@ def discover_sessions(
         if not (screenshots_dir.exists() and agg_path.exists()):
             continue
 
-        if skip_existing and (session_dir / "matched_captions.jsonl").exists():
+        if skip_existing and (session_dir / "data.jsonl").exists():
             continue
 
         has_images = any(
