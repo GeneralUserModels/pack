@@ -6,7 +6,6 @@ from label.models import SessionConfig, VideoPath
 
 def discover_sessions(
     sessions_root: Path,
-    agg_filename: str = "",
     chunk_duration: int = 60,
     skip_existing: bool = False
 ) -> List[SessionConfig]:
@@ -44,8 +43,11 @@ def discover_sessions(
     return configs
 
 
-def discover_video_sessions(sessions_root: Path, chunk_duration: int = 60,
-                            video_exts: Tuple[str, ...] = (".mp4", ".avi", ".mov", ".mkv")) -> List[SessionConfig]:
+def discover_video_sessions(
+    sessions_root: Path,
+    chunk_duration: int = 60,
+    video_exts: Tuple[str, ...] = (".mp4", ".avi", ".mov", ".mkv")
+) -> List[SessionConfig]:
 
     if not sessions_root.exists():
         raise RuntimeError(f"Sessions root not found: {sessions_root}")

@@ -1,19 +1,20 @@
+import re
+import json
+import math
 from pathlib import Path
 from typing import List, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-import json
-import math
-import re
 
-from label.models import SessionConfig, ChunkTask, Caption, Aggregation, VideoPath
+from label.models import SessionConfig, ChunkTask, Caption, Aggregation, VideoPath, MatchedCaption
 from label.video import create_video, split_video, compute_max_size
 from label.clients import VLMClient
 
 
 class Processor:
     def __init__(
-        self, client: VLMClient,
+        self,
+        client: VLMClient,
         num_workers: int = 4,
         video_only: bool = False,
         prompt_file: str = "prompts/default.txt"
@@ -30,8 +31,12 @@ class Processor:
             p = Path(__file__).parent / path
         return p.read_text()
 
-    def process_sessions(self, configs: List[SessionConfig], fps: int = 1,
-                         annotate: bool = False) -> dict:
+    def process_sessions(
+        self,
+        configs: List[SessionConfig],
+        fps: int = 1,
+        annotate: bool = False
+    ) -> dict:
 
         tasks = []
 
@@ -48,8 +53,12 @@ class Processor:
 
         return self._save_results(results, configs, fps)
 
-    def _prepare_standard(self, config: SessionConfig, fps: int,
-                          annotate: bool) -> List[ChunkTask]:
+    def _prepare_standard(
+        self,
+        config: SessionConfig,
+        fps: int,
+        annotate: bool
+    ) -> List[ChunkTask]:
 
         screenshots = sorted([
             p for p in config.screenshots_dir.iterdir()
@@ -150,8 +159,11 @@ class Processor:
         response = self.client.generate(task.prompt, file_desc)
         return response.json
 
-    def _save_results(self, results: List[Tuple[ChunkTask, any]],
-                      configs: List[SessionConfig], fps: int) -> dict:
+    def _save_results(
+        self, results: List[Tuple[ChunkTask, any]],
+        configs: List[SessionConfig],
+        fps: int
+    ) -> dict:
 
         session_captions = {}
 
@@ -200,13 +212,13 @@ class Processor:
             try:
                 mins, secs = map(int, start_str.split(":"))
                 rel_start = mins * 60 + secs
-            except:
+            except Exception:
                 rel_start = 0
 
             try:
                 mins, secs = map(int, end_str.split(":"))
                 rel_end = mins * 60 + secs
-            except:
+            except Exception:
                 rel_end = rel_start
 
             abs_start = task.chunk_start_time + rel_start
@@ -221,8 +233,12 @@ class Processor:
 
         return captions
 
-    def _create_matched_captions(self, config: SessionConfig,
-                                 captions: List[Caption], fps: int):
+    def _create_matched_captions(
+        self,
+        config: SessionConfig,
+        captions: List[Caption],
+        fps: int
+    ):
 
         aggs = config.load_aggregations()
         if not aggs:
@@ -230,7 +246,6 @@ class Processor:
 
         aggs.sort(key=lambda x: x.timestamp)
 
-        from models import MatchedCaption
         matched = []
 
         for caption in captions:
@@ -251,8 +266,12 @@ class Processor:
 
         config.save_matched_captions(matched)
 
-    def _chunk_aggregations(self, aggs: List[Aggregation], start_time: float,
-                            chunk_duration: int) -> List[List[Aggregation]]:
+    def _chunk_aggregations(
+        self,
+        aggs: List[Aggregation],
+        start_time: float,
+        chunk_duration: int
+    ) -> List[List[Aggregation]]:
 
         if not aggs:
             return []
@@ -274,10 +293,10 @@ class Processor:
         if m:
             try:
                 return float(m.group(1))
-            except:
+            except Exception:
                 pass
 
         try:
             return path.stat().st_mtime
-        except:
+        except Exception:
             return None

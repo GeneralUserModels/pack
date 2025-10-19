@@ -1,6 +1,7 @@
 import argparse
 import time
 import signal
+import os
 import sys
 import threading
 from pathlib import Path
@@ -11,7 +12,7 @@ from record.models import ImageQueue, AggregationConfig, EventQueue
 from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer, plot_summary_stats
-from record.constants import Constants
+from record.constants import CONSTANTS, sync_constants
 
 
 class ScreenRecorder:
@@ -52,20 +53,20 @@ class ScreenRecorder:
         self.input_event_queue = EventQueue(
             image_queue=self.image_queue,
             click_config=AggregationConfig(
-                gap_threshold=Constants.CLICK_GAP_THRESHOLD,
-                total_threshold=Constants.CLICK_TOTAL_THRESHOLD
+                gap_threshold=CONSTANTS.CLICK_GAP_THRESHOLD,
+                total_threshold=CONSTANTS.CLICK_TOTAL_THRESHOLD
             ),
             move_config=AggregationConfig(
-                gap_threshold=Constants.MOVE_GAP_THRESHOLD,
-                total_threshold=Constants.MOVE_TOTAL_THRESHOLD
+                gap_threshold=CONSTANTS.MOVE_GAP_THRESHOLD,
+                total_threshold=CONSTANTS.MOVE_TOTAL_THRESHOLD
             ),
             scroll_config=AggregationConfig(
-                gap_threshold=Constants.SCROLL_GAP_THRESHOLD,
-                total_threshold=Constants.SCROLL_TOTAL_THRESHOLD
+                gap_threshold=CONSTANTS.SCROLL_GAP_THRESHOLD,
+                total_threshold=CONSTANTS.SCROLL_TOTAL_THRESHOLD
             ),
             key_config=AggregationConfig(
-                gap_threshold=Constants.KEY_GAP_THRESHOLD,
-                total_threshold=Constants.KEY_TOTAL_THRESHOLD
+                gap_threshold=CONSTANTS.KEY_GAP_THRESHOLD,
+                total_threshold=CONSTANTS.KEY_TOTAL_THRESHOLD
             ),
             poll_interval=1.0,
             session_dir=self.session_dir
@@ -190,7 +191,7 @@ class ScreenRecorder:
 
         self.input_event_queue.process_all_remaining()
 
-        time.sleep(0.5)
+        time.sleep(1.5)
 
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=0.1)
@@ -268,8 +269,17 @@ def main():
         nargs=2,
         help="Maximal resolution for screenshots (width, height)"
     )
+    parser.add_argument(
+        "-p", "--precision",
+        type=str,
+        choices=["accurate", "rough"],
+        default="accurate",
+        help="Precision level for event aggregation (default: accurate)"
+    )
 
     args = parser.parse_args()
+    os.environ["CAPTURE_PRECISION"] = args.precision
+    sync_constants()
 
     recorder = ScreenRecorder(
         fps=args.fps,

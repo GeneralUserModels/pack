@@ -1,7 +1,9 @@
-from typing import List, Union, Optional, Dict
-import json
-from pathlib import Path
 import base64
+import json
+import re
+from pathlib import Path
+from typing import List, Union, Optional, Dict
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import OpenAI
 from label.clients.client import VLMClient, CAPTION_SCHEMA
@@ -19,7 +21,6 @@ class VLLMResponse:
         try:
             self._json = json.loads(text)
         except json.JSONDecodeError:
-            import re
             match = re.search(r'\{.*\}|\[.*\]', text, re.DOTALL)
             if match:
                 try:
@@ -123,8 +124,6 @@ class VLLMClient(VLMClient):
 
         if len(prompts) != len(file_descs):
             raise ValueError("prompts and file_descriptors must match in length")
-
-        from concurrent.futures import ThreadPoolExecutor
 
         params = {
             "model": self.model_name,
