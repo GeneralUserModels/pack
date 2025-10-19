@@ -174,7 +174,7 @@ def main():
 
         for config in configs:
             if not config.matched_captions_jsonl.exists():
-                print(f"Skipping {config.session_id}: no matched_captions.jsonl")
+                print(f"Skipping Visualizing {config.session_id}: no data.jsonl")
                 continue
 
             try:
