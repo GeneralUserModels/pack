@@ -6,9 +6,13 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
+from label.video import annotate_image, scale_and_pad
+from label.models import Aggregation
+
 
 class Visualizer:
-    def __init__(self):
+    def __init__(self, annotate: bool = True):
+        self.annotate = annotate
         self._load_fonts()
 
     def _load_fonts(self):
@@ -19,13 +23,30 @@ class Visualizer:
         except Exception:
             self.font_large = self.font_medium = self.font_small = ImageFont.load_default()
 
-    def visualize(self, session_dir: Path, output_path: Optional[Path] = None, fps: int = 1) -> Path:
+    def visualize(
+        self,
+        session_dir: Path,
+        output_path: Optional[Path] = None,
+        fps: int = 1,
+        deduplicate_events: bool = True,
+        min_event_count: int = 3
+    ) -> Path:
+        """
+        Create an annotated video from session data.
+
+        Args:
+            session_dir: Path to the session directory
+            output_path: Output video path (default: session_dir/annotated.mp4)
+            fps: Frames per second for the output video
+            deduplicate_events: If True, deduplicate events in text summaries
+            min_event_count: Minimum consecutive events to summarize when deduplicating
+        """
         if not output_path:
             output_path = session_dir / "annotated.mp4"
 
         matched_path = session_dir / "data.jsonl"
         if not matched_path.exists():
-            raise RuntimeError(f"matched_captions.jsonl not found in {session_dir}")
+            raise RuntimeError(f"data.jsonl not found in {session_dir}")
 
         matched_data = []
         with open(matched_path, 'r', encoding='utf-8') as f:
@@ -70,8 +91,18 @@ class Visualizer:
             tmpdir_path = Path(tmpdir)
 
             for idx, (img, entry) in enumerate(tqdm(loaded, desc="Annotating")):
-                canvas = self._resize_and_pad(img, target_w, target_h)
-                annotated = self._annotate(canvas, entry)
+                # Scale and pad the image
+                canvas, scale, x_offset, y_offset = scale_and_pad(img, target_w, target_h)
+
+                # Apply arrow annotations if requested
+                if self.annotate:
+                    aggregations = self._reconstruct_aggregations(entry)
+                    if aggregations:
+                        # Use the first aggregation for visual annotation
+                        canvas = annotate_image(canvas, aggregations[0], scale, x_offset, y_offset)
+
+                # Add text overlays
+                annotated = self._add_text_overlays(canvas, entry, deduplicate_events, min_event_count)
 
                 frame_path = tmpdir_path / f"{idx:06d}.jpg"
                 annotated.save(frame_path)
@@ -80,29 +111,52 @@ class Visualizer:
 
         return output_path
 
-    def _resize_and_pad(self, img: Image.Image, target_w: int, target_h: int) -> Image.Image:
-        w, h = img.size
-        scale = min(target_w / w, target_h / h)
-        new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+    def _reconstruct_aggregations(self, entry: dict) -> List[Aggregation]:
+        """Reconstruct Aggregation objects from the matched data entry."""
+        try:
+            # Get raw events from the entry
+            raw_events = entry.get('raw_events', [])
+            if not raw_events:
+                return []
 
-        resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS) if (new_w, new_h) != (w, h) else img
+            # Create a single aggregation with all events
+            agg_data = {
+                'timestamp': entry.get('start_time', 0),
+                'end_timestamp': entry.get('end_time', 0),
+                'reason': 'reconstructed',
+                'event_type': 'mixed',
+                'is_start': True,
+                'screenshot_path': entry.get('img'),
+                'events': raw_events,
+                'monitor': raw_events[0].get('monitor') if raw_events else None
+            }
 
-        canvas = Image.new('RGB', (target_w, target_h), (0, 0, 0))
-        paste_x, paste_y = (target_w - new_w) // 2, (target_h - new_h) // 2
-        canvas.paste(resized, (paste_x, paste_y))
+            return [Aggregation.from_dict(agg_data)]
+        except Exception as e:
+            print(f"Warning: failed to reconstruct aggregations: {e}")
+            return []
 
-        return canvas
-
-    def _annotate(self, img: Image.Image, entry: dict) -> Image.Image:
+    def _add_text_overlays(self, img: Image.Image, entry: dict,
+                           deduplicate: bool, min_count: int) -> Image.Image:
+        """Add caption and event summary text overlays to the image."""
         draw = ImageDraw.Draw(img)
         width, height = img.size
 
         caption = entry.get('caption', '')
-        events = entry.get('raw_events', [])
         start_time = entry.get('start_formatted', '')
         end_time = entry.get('end_formatted', '')
 
-        event_summary = self._summarize_events(events)
+        # Generate event summary using to_prompt if we have aggregations
+        aggregations = self._reconstruct_aggregations(entry)
+        if aggregations:
+            # Use the Aggregation's to_prompt method
+            time_str = f"[{start_time} - {end_time}]"
+            prompt = aggregations[0].to_prompt(time_str, deduplicate=deduplicate, min_count=min_count)
+
+            # Extract just the actions part from the prompt
+            event_summary = self._extract_actions_from_prompt(prompt)
+        else:
+            event_summary = ""
 
         self._draw_caption_box(draw, width, height, caption, start_time, end_time)
 
@@ -111,113 +165,27 @@ class Visualizer:
 
         return img
 
-    def _summarize_events(self, events: List[dict]) -> str:
-        if not events:
-            return ""
-
-        compressed = self._compress_events(events)
+    def _extract_actions_from_prompt(self, prompt: str) -> str:
+        """Extract the actions section from the to_prompt output."""
+        lines = prompt.strip().split('\n')
         actions = []
-        keys = []
+        in_actions = False
 
-        for event in compressed:
-            etype = event.get("event_type")
-            details = event.get("details", {})
+        for line in lines:
+            if 'Actions:' in line:
+                in_actions = True
+                continue
+            if in_actions and line.strip() and line.strip() != 'No actions recorded.':
+                # Remove leading tabs and format as bullet points
+                action = line.strip()
+                if action:
+                    actions.append(f"• {action}")
 
-            if etype == "key_press":
-                key = details.get("key", "unknown").replace("Key.", "")
-                if key:
-                    keys.append(key)
-
-            elif etype in ["mouse_down", "mouse_click"]:
-                if keys:
-                    actions.append(f"Key: {keys[0]}" if len(keys) == 1 else f"Keys: {'+'.join(keys)}")
-                    keys.clear()
-
-                button = details.get("button", "unknown").replace("Button.", "")
-                double = details.get("double_click", False)
-                click_text = f"Click {button}" + (" (2x)" if double else "")
-                actions.append(click_text)
-
-            elif etype == "mouse_scroll":
-                if keys:
-                    actions.append(f"Key: {keys[0]}" if len(keys) == 1 else f"Keys: {'+'.join(keys)}")
-                    keys.clear()
-
-                direction = event.get("_direction") or self._scroll_direction(details)
-                actions.append(f"Scroll {direction}")
-
-            elif etype == "mouse_move":
-                if keys:
-                    actions.append(f"Key: {keys[0]}" if len(keys) == 1 else f"Keys: {'+'.join(keys)}")
-                    keys.clear()
-                actions.append("Move mouse")
-
-        if keys:
-            actions.append(f"Key: {keys[0]}" if len(keys) == 1 else f"Keys: {'+'.join(keys)}")
-
-        if len(actions) > 5:
-            actions = actions[:5] + [f"... and {len(actions) - 5} more"]
-
-        return "\n".join([f"• {a}" for a in actions])
-
-    def _compress_events(self, events: List[dict]) -> List[dict]:
-        if not events:
-            return []
-
-        compressed = []
-        i, n = 0, len(events)
-
-        while i < n:
-            e = events[i]
-            et = e.get("event_type")
-
-            if et == "mouse_move":
-                j = i + 1
-                while j < n and events[j].get("event_type") == "mouse_move":
-                    j += 1
-                compressed.append(events[j - 1])
-                i = j
-
-            elif et == "mouse_scroll":
-                j, last_dir = i, None
-                while j < n and events[j].get("event_type") == "mouse_scroll":
-                    details = events[j].get("details", {})
-                    dir_ = self._scroll_direction(details)
-                    if dir_ != last_dir:
-                        compressed.append({"event_type": "mouse_scroll", "details": details, "_direction": dir_})
-                        last_dir = dir_
-                    j += 1
-                i = j
-
-            else:
-                compressed.append(e)
-                i += 1
-
-        return compressed
-
-    def _scroll_direction(self, scroll_data) -> str:
-        if isinstance(scroll_data, dict):
-            dx, dy = scroll_data.get("dx", 0), scroll_data.get("dy", 0)
-        elif isinstance(scroll_data, (list, tuple)) and len(scroll_data) >= 2:
-            dx, dy = scroll_data[0], scroll_data[1]
-        else:
-            return "unknown"
-
-        dirs = []
-        if dy > 0:
-            dirs.append("up")
-        elif dy < 0:
-            dirs.append("down")
-        if dx > 0:
-            dirs.append("right")
-        elif dx < 0:
-            dirs.append("left")
-
-        return " ".join(dirs) if dirs else "unknown"
+        return '\n'.join(actions) if actions else ""
 
     def _draw_caption_box(self, draw: ImageDraw.Draw, width: int, height: int,
                           caption: str, start_time: str, end_time: str):
-
+        """Draw the caption box at the top of the image."""
         padding = 20
         time_str = f"[{start_time} - {end_time}]"
         full_text = f"{time_str}\n{caption}"
@@ -243,6 +211,7 @@ class Visualizer:
             y_offset += line_height
 
     def _draw_event_box(self, draw: ImageDraw.Draw, width: int, height: int, event_summary: str):
+        """Draw the event summary box at the bottom of the image."""
         padding = 15
         lines = event_summary.split('\n')
         line_height = 22
@@ -265,6 +234,7 @@ class Visualizer:
             y_offset += line_height
 
     def _wrap_text(self, text: str, max_width: int, font) -> List[str]:
+        """Wrap text to fit within a maximum width."""
         lines = []
         for paragraph in text.split('\n'):
             if not paragraph:
@@ -290,6 +260,7 @@ class Visualizer:
         return lines
 
     def _create_video(self, frames_dir: Path, output_path: Path, fps: int):
+        """Create a video from a directory of frames using FFmpeg."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         cmd = [

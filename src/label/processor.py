@@ -1,6 +1,5 @@
 import re
 import json
-import math
 from pathlib import Path
 from typing import List, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -108,6 +107,8 @@ class Processor:
                 prompt_lines.append(agg.to_prompt(time_str))
 
             full_prompt = self.prompt.replace("{{LOGS}}", "".join(prompt_lines))
+            with open(video_path.parent / f"prompt_{i:03d}.txt", 'w') as f:
+                f.write(full_prompt)
 
             tasks.append(ChunkTask(
                 session_id=config.session_id,
@@ -328,18 +329,7 @@ class Processor:
 
         if not aggs:
             return []
-
-        max_ts = max(a.timestamp for a in aggs)
-        num_chunks = max(1, math.ceil((max_ts - start_time) / chunk_duration))
-
-        chunks = [[] for _ in range(num_chunks)]
-
-        for agg in aggs:
-            idx = int((agg.timestamp - start_time) / chunk_duration)
-            idx = max(0, min(idx, num_chunks - 1))
-            chunks[idx].append(agg)
-
-        return chunks
+        return [aggs[i:i + chunk_duration] for i in range(0, len(aggs), chunk_duration)]
 
     def _extract_timestamp(self, path: Path) -> float:
         m = re.search(r'(\d+\.\d+)', path.name)
