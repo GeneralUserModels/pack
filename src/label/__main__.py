@@ -170,7 +170,7 @@ def main():
 
     if args.visualize:
         print("\nCreating visualizations...")
-        visualizer = Visualizer()
+        visualizer = Visualizer(args.annotate)
 
         for config in configs:
             if not config.matched_captions_jsonl.exists():
