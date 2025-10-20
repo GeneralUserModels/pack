@@ -46,6 +46,9 @@ Two main entry points:
 
 ---
 
+# Detailed Commands
+
+
 ## `uv run -m record` — Record a session
 
 **What it does:** Records screen activity and user input events into a session folder.
@@ -59,7 +62,7 @@ Two main entry points:
 | `-b, --buffer-all-images`        | flag                 | off        | Save all buffer images to disk                  |
 | `-m, --monitor`                  | flag                 | off        | Enable real-time monitoring of the last session |
 | `-r, --max-res <width> <height>` | int int              | none       | Maximal resolution for screenshots              |
-| `-p, --precision`                | `accurate` / `rough` | `accurate` | Precision level for event aggregation           |
+| `-p, --precision`                | `accurate` / `rough` | `accurate` | Precision level for event aggregation (presets) |
 
 ### Output
 
@@ -76,7 +79,7 @@ logs/session_name
 
 ---
 
-## `uv run -m label` — Label / process a session
+## `uv run -m label` — Label a session
 
 **What it does:** Loads recorded sessions or raw video, chunks and formats them, runs VLM labeling, and optionally renders annotated videos.
 
@@ -187,6 +190,7 @@ Use an existing vLLM server:
 uv run -m label \
   --session logs/session_xyz \
   --client vllm \
+  --model Qwen/Qwen3-VL-8B-Thinking-FP8 \
   --vllm-url http://127.0.0.1:8000
 ```
 
