@@ -104,13 +104,13 @@ def annotate_image(img: Image.Image, agg: Aggregation, scale: float = 1.0,
 
     movements = []
     prev_pos = None
-    for event in agg.events:
-        if event.cursor_position and len(event.cursor_position) >= 2:
-            if prev_pos and prev_pos != event.cursor_position:
-                movements.append({'start': prev_pos, 'end': event.cursor_position})
-            prev_pos = event.cursor_position
+    mpos_events = [e for e in agg.events if e.cursor_position and len(e.cursor_position) >= 2]
+    for event in ([mpos_events[0], mpos_events[-1]] if len(mpos_events) >= 2 else mpos_events):
+        if prev_pos and prev_pos != event.cursor_position:
+            movements.append({'start': prev_pos, 'end': event.cursor_position})
+        prev_pos = event.cursor_position
 
-    for mv in ([movements[0], movements[-1]] if len(movements) >= 2 else movements):
+    for mv in movements:
         draw_arrow(draw, img.size, mv['start'], mv['end'], monitor, scale, x_offset, y_offset)
 
     clicks = [e for e in agg.events if e.is_mouse_event]
@@ -143,13 +143,13 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
     if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
         return
 
-    line_width = max(1, int(3 * scale))
+    line_width = max(1, int(6 * scale))
     draw.line([(start_x, start_y), (end_x, end_y)], fill='orange', width=line_width)
 
-    arrow_length = int(15 * scale)
+    arrow_length = int(25 * scale)
     dx, dy = end_x - start_x, end_y - start_y
     angle = np.arctan2(dy, dx)
-    arrow_angle_rad = np.radians(25)
+    arrow_angle_rad = np.radians(40)
 
     x1 = end_x - arrow_length * np.cos(angle - arrow_angle_rad)
     y1 = end_y - arrow_length * np.sin(angle - arrow_angle_rad)
@@ -158,7 +158,7 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
 
     draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill='orange', outline='darkorange')
 
-    marker_size = int(4 * scale)
+    marker_size = int(8 * scale)
     draw.ellipse(
         [(start_x - marker_size, start_y - marker_size),
          (start_x + marker_size, start_y + marker_size)],

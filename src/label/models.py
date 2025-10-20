@@ -154,13 +154,226 @@ class Aggregation:
             'burst_id': self.burst_id
         }
 
-    def to_prompt(self, time_marker: str) -> str:
-        return f"[{time_marker}] {self.reason}\n"
+    def _click_to_relative(self, pos, monitor):
+        if not monitor:
+            print("No monitor info available for position conversion.")
+            return pos
+        width = monitor.get('width', 1)
+        height = monitor.get('height', 1)
+        if isinstance(pos, tuple) or isinstance(pos, list) and len(pos) == 2:
+            x, y = pos
+            x -= monitor.get('left', 0)
+            y -= monitor.get('top', 0)
+            relative_x = round((x / width) * 1_000)
+            relative_y = round((y / height) * 1_000)
+            return (relative_x, relative_y)
+
+    def to_prompt(self, time, deduplicate=True, min_count=3):
+        """
+        Generate a prompt with optional event deduplication.
+
+        Args:
+            time: Timestamp string for the event
+            deduplicate: Whether to deduplicate consecutive events of same type
+            min_count: Minimum consecutive events needed to summarize (when deduplicating)
+        """
+        if not deduplicate:
+            return self._to_prompt_original(time)
+
+        actions = []
+        keys_pressed = []
+
+        # Group consecutive events by type
+        i = 0
+        while i < len(self.events):
+            event = self.events[i]
+            event_type = event.event_type
+
+            # Count consecutive events of same type
+            count = 1
+            while i + count < len(self.events) and self.events[i + count].event_type == event_type:
+                count += 1
+
+            # Get the group of events
+            event_group = self.events[i:i + count]
+
+            if event_type == 'key_press':
+                for e in event_group:
+                    key = e.details.get('key', 'Key.unknown')
+                    key = key.replace("Key.", "") if key and key.startswith("Key.") else key
+                    if key:
+                        keys_pressed.append(key)
+
+            # Handle mouse events
+            elif event_type == 'mouse_down':
+                if keys_pressed:
+                    actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+
+                # Process each click individually (clicks are usually meaningful)
+                for e in event_group:
+                    button = e.details.get('button', 'Button.unknown')
+                    button = button.replace('Button.', '') if button and button.startswith('Button.') else button
+                    cursor_pos = e.cursor_position
+                    double_click = e.details.get('double_click', False)
+                    mouse_str = f"Mouse clicked {button} at {self._click_to_relative(cursor_pos, e.monitor)}"
+                    mouse_str += " (double click)" if double_click else ""
+                    actions.append(mouse_str)
+
+            elif event_type == 'mouse_scroll':
+                if keys_pressed:
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+
+                if count >= min_count:
+                    scroll_data = event_group[0].details.data
+                    direction = self._convert_scroll_direction(scroll_data)
+                    actions.append(f"Scrolled {direction} ({count} times)")
+                else:
+                    for e in event_group:
+                        scroll_data = e.details.data
+                        direction = self._convert_scroll_direction(scroll_data)
+                        actions.append(f"Scrolled {direction}")
+
+            elif event_type == 'mouse_move':
+                if keys_pressed:
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+
+                # Summarize if many consecutive moves
+                if count >= min_count:
+                    start_pos = self._click_to_relative(event_group[0].cursor_position, event_group[0].monitor)
+                    end_pos = self._click_to_relative(event_group[-1].cursor_position, event_group[-1].monitor)
+                    actions.append(f"Mouse moved from {start_pos} to {end_pos} ({count} movements)")
+                else:
+                    for e in event_group:
+                        cursor_pos = e.cursor_position
+                        actions.append(f"Mouse moved to {self._click_to_relative(cursor_pos, e.monitor)}")
+
+            i += count
+
+        # Flush any remaining keys
+        if keys_pressed:
+            actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+
+        # Format output
+        action_list = None
+        if actions:
+            action_list = '\t' + '\n\t'.join([f"{action}" for action in actions])
+
+        if len(self.events) > 1:
+            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
+            click_end = self._click_to_relative(self.events[-1].cursor_position, self.events[-1].monitor)
+            click_prompt = f"Cursor positions: {click_start} to {click_end}"
+        elif len(self.events) == 1:
+            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
+            click_prompt = f"Cursor position: {click_start}"
+        else:
+            click_prompt = ""
+
+        prompt = f"""
+{time} Event:
+{click_prompt}
+Actions:
+{''.join(action_list) if action_list else 'No actions recorded.'}
+        """
+        return prompt
+
+    def _to_prompt_original(self, time):
+        """Original to_prompt implementation without deduplication"""
+        actions = []
+        keys_pressed = []
+
+        for event in self.events:
+            event_type = event.event_type
+
+            if event_type == 'key_press':
+                key = event.details.get('key', 'Key.unknown')
+                key = key.replace("Key.", "") if key and key.startswith("Key.") else key
+                if key:
+                    keys_pressed.append(key)
+
+            elif event_type == 'mouse_down':
+                if keys_pressed:
+                    actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+                button = event.details.get('button', 'Button.unknown')
+                button = button.replace('Button.', '') if button and button.startswith('Button.') else button
+                cursor_pos = event.cursor_position
+                double_click = event.details.get('double_click', False)
+                mouse_str = f"Mouse clicked {button} at {self._click_to_relative(cursor_pos, event.monitor)}"
+                mouse_str += " (double click)" if double_click else ""
+                actions.append(mouse_str)
+
+            elif event_type == 'mouse_scroll':
+                if keys_pressed:
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+                scroll_data = event.details.data
+                direction = self._convert_scroll_direction(scroll_data)
+                actions.append(f"Scrolled {direction}")
+
+            elif event_type == 'mouse_move':
+                if keys_pressed:
+                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+                    keys_pressed.clear()
+                cursor_pos = event.cursor_position
+                actions.append(f"Mouse moved to {self._click_to_relative(cursor_pos, event.monitor)}")
+
+        if keys_pressed:
+            actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
+
+        action_list = None
+        if actions:
+            action_list = '\t' + '\n\t'.join([f"{action}" for action in actions])
+        if len(self.events) > 1:
+            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
+            click_end = self._click_to_relative(self.events[-1].cursor_position, self.events[-1].monitor)
+            click_prompt = f"Cursor positions: {click_start} to {click_end}"
+        elif len(self.events) == 1:
+            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
+            click_prompt = f"Cursor position: {click_start}"
+        else:
+            click_prompt = ""
+
+        prompt = f"""
+{time} Event:
+{click_prompt}
+Actions:
+{''.join(action_list) if action_list else 'No actions recorded.'}
+        """
+        return prompt
 
     def get_image_path(self, session_dir: Path) -> Optional[ImagePath]:
         if not self.screenshot_path:
             return None
         return ImagePath(Path(self.screenshot_path), session_dir)
+
+    @staticmethod
+    def _convert_scroll_direction(scroll_data):
+        if isinstance(scroll_data, dict):
+            dx = scroll_data.get('dx', 0)
+            dy = scroll_data.get('dy', 0)
+        elif isinstance(scroll_data, (list, tuple)) and len(scroll_data) >= 2:
+            dx, dy = scroll_data[0], scroll_data[1]
+        else:
+            return "no scroll"
+
+        directions = []
+        if dy > 0:
+            directions.append("up")
+        elif dy < 0:
+            directions.append("down")
+        if dx > 0:
+            directions.append("right")
+        elif dx < 0:
+            directions.append("left")
+
+        if directions:
+            direction_str = " ".join(directions)
+        else:
+            direction_str = "no scroll"
+        return direction_str
 
 
 @dataclass
