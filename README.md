@@ -19,7 +19,6 @@
 ```shell
 git clone https://github.com/GeneralUserModels/pack.git  # Clone repo
 cd pack
-uv sync --python 3.12.7  # Install dependencies
 cp .env.example .env  #  Optionally add your Gemini API key here
 ```
 
@@ -150,6 +149,15 @@ uv run -m label \
   --client vllm \
   --vllm-url http://127.0.0.1:8000
 ```
+
+> [!NOTE]
+> For deploying vllm server, see the [vLLM documentation](https://vllm.ai/).
+> E.g. you can run:
+> ```shell
+> vllm serve Qwen/Qwen3-VL-30B-A3B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 4 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines --enable-expert-parallel --enforce-eager
+>
+>vllm serve Qwen/Qwen3-VL-8B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 4 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines
+>```
 ---
 
 ## Label output (per processed session)
