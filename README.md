@@ -22,17 +22,27 @@ cd pack
 cp .env.example .env  #  Optionally add your Gemini API key here
 ```
 
----
-
-# Usage
+## Usage
 
 Two main entry points:
 
-* **Record a session** — capture screenshots + input events
-  `uv run -m record`
-
-* **Label / process a session** — aggregate events, run VLM labeling, optionally create annotated videos
-  `uv run -m label`
+* **Record a session**
+  ```shell
+  uv run -m record --monitor  # start and monitor recording 
+  ```
+  ```shell
+  CTRL+C  # stop recording
+  ```
+* **Label a session**
+  ```shell
+    uv run -m label \
+  --sessions-root logs/ `# label all sessions in logs dir` \
+  --skip-existing `# skip sessions already processed` \
+  --client gemini \
+  --model gemini-2.5-pro \
+  --annotate `# visualize mouse movement and click positions` \
+  --visualize `# final video creation`
+  ```
 
 ---
 
@@ -40,7 +50,7 @@ Two main entry points:
 
 **What it does:** Records screen activity and user input events into a session folder.
 
-**Flags**
+### Flags
 
 | Flag                             | Type                 | Default    | Description                                     |
 | -------------------------------- | -------------------- | ---------- | ----------------------------------------------- |
@@ -50,6 +60,19 @@ Two main entry points:
 | `-m, --monitor`                  | flag                 | off        | Enable real-time monitoring of the last session |
 | `-r, --max-res <width> <height>` | int int              | none       | Maximal resolution for screenshots              |
 | `-p, --precision`                | `accurate` / `rough` | `accurate` | Precision level for event aggregation           |
+
+### Output
+
+```shell
+logs/session_name
+├── aggregations.jsonl
+├── events.jsonl
+├── screenshots
+│   └── 1760971355.978042_reason_key_start.jpg
+├── screenshots.jsonl
+└── summary.png
+```
+
 
 ---
 
@@ -106,6 +129,23 @@ Two main entry points:
 | `--startup-timeout` | `600`   | Timeout for server startup       |
 | `--enforce-eager`   | flag    | disable vllm CUDA graph creation |
 
+### Output
+
+```shell
+logs/session_name
+├── aggregations
+│   └── 000.json  # chunked aggregations used for LLM prompting
+├── annotated.mp4  # final video showing captions and input events
+├── captions
+│   └── 000.json  # generated captions of chunk
+├── captions.jsonl  # summarized generated captions
+├── chunks
+│   ├── 000.mp4  # video chunk used for LLM prompting
+│   ├── master.mp4
+│   └── prompt_000.txt  # prompt used for LLM prompting
+└── data.jsonl  # final data containing raw input events and LLM generated captions
+```
+
 ---
 
 ## Examples
@@ -154,18 +194,10 @@ uv run -m label \
 > For deploying vllm server, see the [vLLM documentation](https://vllm.ai/).
 > E.g. you can run:
 > ```shell
-> vllm serve Qwen/Qwen3-VL-30B-A3B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 4 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines --enable-expert-parallel --enforce-eager
+> vllm serve Qwen/Qwen3-VL-30B-A3B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 8 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines --enable-expert-parallel --enforce-eager
 >
 >vllm serve Qwen/Qwen3-VL-8B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 4 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines
 >```
----
-
-## Label output (per processed session)
-
-* Screenshot video and chunks
-* `captions.jsonl` and caption chunk files — VLM-generated action captions with relative timestamps
-* `data.jsonl` — captions matched to screenshots with recorded timestamps and input events. The main output of the labeling step.
-* `annotated_session.mp4` — annotated video (when `--visualize-session` is used)
 
 ---
 
@@ -202,6 +234,6 @@ The `label` module:
 * Loads sessions or raw video, chunks them and their logs, and prepares inputs for the VLM.
 * Uses prompts (in `label/prompts`) to instruct the VLM to generate captions that describe the user’s actions and context.
 * Produces `captions.jsonl` and `data.jsonl` (captions aligned to screenshots and events).
-* Optionally renders an annotated video (`annotated_session.mp4`) showing captions and event visualizations overlayed on frames.
+* Optionally renders an annotated video (`annotated.mp4`) showing captions and event visualizations overlayed on frames.
 
 The label step performs a second layer of aggregation: it uses the bursts detected at recording time and further refines and annotates them with VLM outputs to create final human-readable summaries.
