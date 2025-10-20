@@ -39,6 +39,7 @@ def parse_args():
     vllm_group.add_argument("--gpu-memory", type=float, default=0.9)
     vllm_group.add_argument("--max-model-len", type=int)
     vllm_group.add_argument("--expert-parallel", action="store_true")
+    vllm_group.add_argument("--enforce-eager", action="store_true")
     vllm_group.add_argument("--startup-timeout", type=int, default=600)
 
     args = p.parse_args()
@@ -129,6 +130,7 @@ def process_with_vllm(args, configs):
             max_model_len=args.max_model_len,
             expert_parallel=args.expert_parallel,
             startup_timeout=args.startup_timeout,
+            enforce_eager=args.enforce_eager,
         ) as server:
             client = create_client(
                 'vllm',

@@ -96,15 +96,16 @@ Two main entry points:
 
 ### vLLM backend options
 
-| Flag                | Default | Description                |
-| ------------------- | ------- | -------------------------- |
-| `--vllm-url`        | none    | Use existing vLLM server   |
-| `--vllm-port`       | `8000`  | Port for auto-spawned vLLM |
-| `--tensor-parallel` | `1`     | Parallel shards            |
-| `--gpu-memory`      | `0.9`   | Fraction of GPU reserved   |
-| `--max-model-len`   | —       | Max token length           |
-| `--expert-parallel` | flag    | Enable MoE expert parallel |
-| `--startup-timeout` | `600`   | Timeout for server startup |
+| Flag                | Default | Description                      |
+| ------------------- | ------- | -------------------------------- |
+| `--vllm-url`        | none    | Use existing vLLM server         |
+| `--vllm-port`       | `8000`  | Port for auto-spawned vLLM       |
+| `--tensor-parallel` | `1`     | Parallel shards                  |
+| `--gpu-memory`      | `0.9`   | Fraction of GPU reserved         |
+| `--max-model-len`   | —       | Max token length                 |
+| `--expert-parallel` | flag    | Enable MoE expert parallel       |
+| `--startup-timeout` | `600`   | Timeout for server startup       |
+| `--enforce-eager`   | flag    | disable vllm CUDA graph creation |
 
 ---
 

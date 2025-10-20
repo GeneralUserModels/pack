@@ -6,10 +6,18 @@ from typing import Optional
 
 
 class VLLMServer:
-    def __init__(self, model_path: str, port: int = 8000, host: str = "127.0.0.1",
-                 tensor_parallel: int = 1, gpu_memory: float = 0.9,
-                 max_model_len: Optional[int] = None, expert_parallel: bool = False,
-                 startup_timeout: int = 600):
+    def __init__(
+        self,
+        model_path: str,
+        port: int = 8000,
+        host: str = "127.0.0.1",
+        tensor_parallel: int = 1,
+        gpu_memory: float = 0.9,
+        max_model_len: Optional[int] = None,
+        expert_parallel: bool = False,
+        startup_timeout: int = 600,
+        enforce_eager: bool = False
+    ):
 
         self.model_path = model_path
         self.port = port
@@ -21,6 +29,7 @@ class VLLMServer:
         self.startup_timeout = startup_timeout
         self.process: Optional[subprocess.Popen] = None
         self.base_url = f"http://{host}:{port}"
+        self.enforce_eager = enforce_eager
 
         atexit.register(self.stop)
 
@@ -43,6 +52,8 @@ class VLLMServer:
 
         if self.max_model_len:
             cmd.extend(["--max-model-len", str(self.max_model_len)])
+        if self.enforce_eager:
+            cmd.append("--enforce-eager")
 
         self.process = subprocess.Popen(
             cmd,
