@@ -35,13 +35,13 @@ Two main entry points:
   ```
 * **Label a session**
   ```shell
-    uv run -m label \
-  --sessions-root logs/ `# label all sessions in logs dir` \
-  --skip-existing `# skip sessions already processed` \
-  --client gemini \
-  --model gemini-2.5-pro \
-  --annotate `# visualize mouse movement and click positions` \
-  --visualize `# final video creation`
+  uv run -m label \
+    --sessions-root logs/ `# label all sessions in logs dir` \
+    --skip-existing `# skip sessions already processed` \
+    --client gemini \
+    --model gemini-2.5-pro \
+    --annotate `# visualize mouse movement and click positions` \
+    --visualize `# final video creation`
   ```
 
 ---
