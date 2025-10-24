@@ -1,12 +1,11 @@
 import time
 import json
 import ast
+import sys
+import threading
 from collections import deque, defaultdict
 from typing import Deque, Dict, List, Optional
 import warnings
-
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 from record.monitor.reader import TailReader
 
@@ -26,6 +25,9 @@ warnings.filterwarnings(
 
 class RealtimeVisualizer:
     def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = 10, window_s: float = 30.0):
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        
         self.events_reader = TailReader(events_path, from_start=True)
         self.aggr_reader = TailReader(aggr_path, from_start=True)
 
@@ -261,14 +263,27 @@ class RealtimeVisualizer:
         info = f"Events: {len(self.events)} | Bursts: {len(self.bursts)} | "
         info += f"[C]{event_counts['click']} [M]{event_counts['move']} [K]{event_counts['key']} [S]{event_counts['scroll']}"
 
-        self.fig.canvas.manager.set_window_title("Real-time Input Visualizer")
+        # Set window title only if using interactive backend
+        import matplotlib.pyplot as plt
+        if plt.get_backend() != 'Agg':
+            try:
+                self.fig.canvas.manager.set_window_title("Real-time Input Visualizer")
+            except:
+                pass
+        
         self.ax.text(0.995, 0.02, info, ha='right', va='bottom', transform=self.fig.transFigure,
                      fontsize=11, alpha=0.8, family='monospace')
 
     def run(self):
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        
         self.ani = animation.FuncAnimation(
             self.fig, self._draw, interval=self.interval_ms,
             blit=False, cache_frame_data=False
         )
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-        plt.show()
+        
+        # On non-interactive backend, don't call show()
+        if plt.get_backend() != 'Agg':
+            plt.show()
