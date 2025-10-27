@@ -4,7 +4,6 @@ from ApplicationServices import (
     AXUIElementCopyElementAtPosition,
     AXUIElementCopyAttributeValue,
 )
-from AppKit import NSWorkspace
 from record.models.event import InputEvent, EventType
 
 
@@ -38,7 +37,6 @@ class AccessibilityHandler:
     }
     
     def __init__(self):
-        self._workspace = NSWorkspace.sharedWorkspace()
         self._move_counter = 0
     
     def __call__(self, input_event: InputEvent) -> Dict[str, Any]:
@@ -65,25 +63,20 @@ class AccessibilityHandler:
         element = self._get_element_at_position(x, y)
         if element:
             ax_info = self._extract_element_info(element)
-            if ax_info:
+            if ax_info and self._has_useful_info(ax_info):
                 return {'accessibility': ax_info}
         return {}
     
     def _handle_mouse_down(self, input_event: InputEvent) -> Dict[str, Any]:
         x, y = input_event.cursor_position
-        result = {}
         
         element = self._get_element_at_position(x, y)
         if element:
             ax_info = self._extract_element_info(element)
-            if ax_info:
-                result['accessibility'] = ax_info
+            if ax_info and self._has_useful_info(ax_info):
+                return {'accessibility': ax_info}
         
-        app_info = self._get_active_app_info()
-        if app_info:
-            result['active_app'] = app_info
-        
-        return result
+        return {}
     
     def _handle_mouse_up(self, input_event: InputEvent) -> Dict[str, Any]:
         return {}
@@ -93,24 +86,18 @@ class AccessibilityHandler:
         element = self._get_element_at_position(x, y)
         if element:
             ax_info = self._extract_element_info(element)
-            if ax_info:
+            if ax_info and self._has_useful_info(ax_info):
                 return {'accessibility': ax_info}
         return {}
     
     def _handle_key_press(self, input_event: InputEvent) -> Dict[str, Any]:
-        result = {}
-        
         focused_element = self._get_focused_element()
         if focused_element:
             ax_info = self._extract_element_info(focused_element)
-            if ax_info:
-                result['focused_element'] = ax_info
+            if ax_info and self._has_useful_info(ax_info):
+                return {'focused_element': ax_info}
         
-        app_info = self._get_active_app_info()
-        if app_info:
-            result['active_app'] = app_info
-        
-        return result
+        return {}
     
     def _handle_key_release(self, input_event: InputEvent) -> Dict[str, Any]:
         return {}
@@ -182,15 +169,43 @@ class AccessibilityHandler:
         
         return info if info else None
     
-    def _get_active_app_info(self) -> Optional[Dict[str, str]]:
-        try:
-            active_app = self._workspace.frontmostApplication()
-            return {
-                'app_name': active_app.localizedName(),
-                'bundle_id': active_app.bundleIdentifier(),
-            }
-        except:
-            return None
+    
+    def _has_useful_info(self, ax_data: Dict[str, Any]) -> bool:
+        if not ax_data:
+            return False
+        
+        useful_fields = ['AXTitle', 'AXDescription', 'AXValue', 
+                        'AXPlaceholderValue', 'AXURL', 'AXLabel']
+        
+        for field in useful_fields:
+            value = ax_data.get(field)
+            if value and str(value).strip():
+                return True
+        
+        generic_roles = {'AXImage', 'AXGroup', 'AXStaticText', 
+                        'AXScrollArea', 'AXUnknown', 'AXCell'}
+        
+        role = ax_data.get('AXRole', '')
+        
+        if role in generic_roles:
+            return False
+        
+        interactive_roles = {'AXButton', 'AXTextField', 'AXTextArea', 
+                            'AXCheckBox', 'AXRadioButton', 'AXLink',
+                            'AXMenuItem', 'AXPopUpButton', 'AXComboBox', 'AXTab',
+                            'AXSlider'}
+        
+        if role in interactive_roles:
+            return True
+        
+        parent = ax_data.get('_parent', {})
+        if parent:
+            for field in useful_fields:
+                value = parent.get(field)
+                if value and str(value).strip():
+                    return True
+        
+        return False
     
     @staticmethod
     def _clean_value(value):
