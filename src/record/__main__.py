@@ -22,7 +22,8 @@ class ScreenRecorder:
         buffer_seconds: int = 12,
         buffer_all: bool = False,
         monitor: bool = False,
-        max_res: tuple[int, int] = None
+        max_res: tuple[int, int] = None,
+        accessibility: bool = False
     ):
         """
         Initialize the screen recorder.
@@ -32,6 +33,7 @@ class ScreenRecorder:
             buffer_seconds: Number of seconds to keep in buffer
             buffer_all: If True, save all screenshots to disk
             monitor: If True, enable real-time monitoring
+            accessibility: If True, enable accessibility info capture
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
@@ -82,7 +84,7 @@ class ScreenRecorder:
         self.input_event_queue.set_callback(self._on_aggregation_request)
         self.image_queue.add_callback(self._on_new_image)
 
-        self.input_handler = InputEventHandler(self.input_event_queue)
+        self.input_handler = InputEventHandler(self.input_event_queue, accessibility=accessibility)
 
         self.screenshot_manager = ScreenshotHandler(
             image_queue=self.image_queue,
@@ -203,6 +205,8 @@ class ScreenRecorder:
         self.input_event_queue.process_all_remaining()
 
         time.sleep(1.5)
+        
+        self.input_handler.print_performance_stats()
 
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=0.1)
@@ -287,6 +291,11 @@ def main():
         default="accurate",
         help="Precision level for event aggregation (default: accurate)"
     )
+    parser.add_argument(
+        "-a", "--accessibility",
+        action="store_true",
+        help="Enable accessibility info capture (macOS only, may impact performance)"
+    )
 
     args = parser.parse_args()
 
@@ -298,7 +307,8 @@ def main():
         buffer_seconds=args.buffer_seconds,
         buffer_all=args.buffer_all_images,
         monitor=args.monitor,
-        max_res=args.max_res
+        max_res=args.max_res,
+        accessibility=args.accessibility
     )
     recorder.run()
 
