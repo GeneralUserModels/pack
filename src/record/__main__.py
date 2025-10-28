@@ -135,7 +135,7 @@ class ScreenRecorder:
         """Run the real-time visualizer."""
         import sys
         import threading
-        
+
         # On macOS, matplotlib GUI must run on main thread
         # Since this is running in a daemon thread, use non-interactive backend
         if sys.platform == 'darwin' and threading.current_thread() != threading.main_thread():
@@ -143,7 +143,7 @@ class ScreenRecorder:
             matplotlib.use('Agg')
             print("Warning: Running monitor in thread on macOS. Using non-interactive backend.")
             print("The visualization window will not be displayed. Consider running without --monitor flag.")
-        
+
         events_path = self.session_dir / "events.jsonl"
         aggr_path = self.session_dir / "aggregations.jsonl"
         rv = RealtimeVisualizer(events_path, aggr_path, refresh_hz=16, window_s=30.0)

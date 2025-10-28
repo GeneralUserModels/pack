@@ -46,7 +46,7 @@ class Processor:
             else:
                 tasks.extend(self._prepare_standard(config, fps, annotate))
 
-        print(f"[Processor] Processing {len(tasks)} chunks with {self.num_workers} concurrent workers")
+        print(f"[Processor] Processing {len(tasks)} chunks with {min(self.num_workers, len(tasks))} concurrent workers")
 
         results = self._process_tasks(tasks)
 
