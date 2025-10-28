@@ -82,9 +82,12 @@ class VLLMClient(VLMClient):
             "data_url": data_url,
         }
 
-    def generate(self, prompt: Union[str, List[str]],
-                 file_descriptor: Optional[Union[Dict, List[Dict]]] = None,
-                 schema: Optional[Dict] = None) -> Union[VLLMResponse, List[VLLMResponse]]:
+    def generate(
+        self,
+        prompt: Union[str, List[str]],
+        file_descriptor: Optional[Union[Dict, List[Dict]]] = None,
+        schema: Optional[Dict] = None
+    ) -> Union[VLLMResponse, List[VLLMResponse]]:
 
         if schema is None:
             schema = CAPTION_SCHEMA
@@ -150,7 +153,8 @@ class VLLMClient(VLMClient):
             raise
 
     def _generate_batch(
-        self, prompts: List[str],
+        self,
+        prompts: List[str],
         file_descs: Optional[List[Dict]],
         schema: Optional[Dict]
     ) -> List[VLLMResponse]:
