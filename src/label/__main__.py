@@ -29,7 +29,7 @@ def parse_args():
 
     p.add_argument("--client", choices=["gemini", "vllm"], default="gemini")
     p.add_argument("--model", default="")
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=4, help="Number of concurrent workers (set to 1 to disable concurrency)")
 
     vllm_group = p.add_argument_group("vLLM Options")
     vllm_group.add_argument("--vllm-url")
