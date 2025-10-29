@@ -78,10 +78,25 @@ class ProcessedAggregation:
             monitor = event.get("monitor", default_monitor)
 
             if event_type == "key_press":
-                key = event.get("details", {}).get("key", "unknown")
+                details = event.get("details", {})
+                key = details.get("key", "unknown")
                 key = key.replace("Key.", "") if key and isinstance(key, str) and key.startswith("Key.") else key
+                
                 if key:
-                    keys_pressed.append(key)
+                    focused = details.get("focused_element", {})
+                    
+                    key_str = key
+                    if focused:
+                        role = focused.get("AXRole", "")
+                        title = focused.get("AXTitle", "")
+                        if title and role:
+                            key_str = f"{key} (in {role}: '{title}')"
+                        elif title:
+                            key_str = f"{key} (in '{title}')"
+                        elif role:
+                            key_str = f"{key} (in {role})"
+                    
+                    keys_pressed.append(key_str)
 
             elif event_type == "mouse_click":
                 if keys_pressed:
@@ -97,10 +112,27 @@ class ProcessedAggregation:
                 button = button.replace("Button.", "") if button and isinstance(button, str) and button.startswith("Button.") else button
                 cursor_pos = event.get("cursor_position", "unknown position")
                 double_click = details.get("double_click", False)
+                
+                accessibility = details.get("accessibility", {})
 
                 mouse_str = f"Mouse clicked {button} at {self._convert_pos_to_gemini_relative(cursor_pos, monitor)}"
                 if double_click:
                     mouse_str += " (double click)"
+                
+                if accessibility:
+                    role = accessibility.get("AXRole", "")
+                    title = accessibility.get("AXTitle", "")
+                    desc = accessibility.get("AXDescription", "")
+                    
+                    if title and role:
+                        mouse_str += f" on {role}: '{title}'"
+                    elif title:
+                        mouse_str += f" on '{title}'"
+                    elif desc and role:
+                        mouse_str += f" on {role}: '{desc}'"
+                    elif role:
+                        mouse_str += f" on {role}"
+                
                 actions.append(mouse_str)
 
             elif event_type == "mouse_scroll":
@@ -112,8 +144,24 @@ class ProcessedAggregation:
                     )
                     keys_pressed.clear()
 
-                direction = event.get("_direction") or self._convert_scroll_direction(event.get("details", {}))
-                actions.append(f"Scrolled {direction}")
+                details = event.get("details", {})
+                direction = event.get("_direction") or self._convert_scroll_direction(details)
+                accessibility = details.get("accessibility", {})
+                
+                scroll_str = f"Scrolled {direction}"
+                
+                if accessibility:
+                    role = accessibility.get("AXRole", "")
+                    title = accessibility.get("AXTitle", "")
+                    
+                    if title and role:
+                        scroll_str += f" in {role}: '{title}'"
+                    elif title:
+                        scroll_str += f" in '{title}'"
+                    elif role:
+                        scroll_str += f" in {role}"
+                
+                actions.append(scroll_str)
 
             elif event_type == "mouse_move":
                 if keys_pressed:

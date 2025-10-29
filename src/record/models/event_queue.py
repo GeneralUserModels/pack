@@ -277,7 +277,9 @@ class EventQueue:
         candidates = self.image_queue.get_entries_before(
             timestamp, milliseconds=constants.PADDING_BEFORE
         )
-        return candidates[-1]
+        if candidates:
+            return candidates[-1]
+        return None
 
     def _find_screenshot_after(self, timestamp: float) -> Optional[Any]:
         """Find screenshot after timestamp (for end events and split points)."""
@@ -285,7 +287,9 @@ class EventQueue:
         candidates = self.image_queue.get_entries_after(
             timestamp, milliseconds=constants.PADDING_AFTER
         )
-        return candidates[0]
+        if candidates:
+            return candidates[0]
+        return None
 
     def _save_event_to_jsonl(self, event: InputEvent) -> None:
         """Save event to JSONL file."""

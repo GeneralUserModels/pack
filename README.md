@@ -28,7 +28,7 @@ Two main entry points:
 
 * **Record a session**
   ```shell
-  uv run -m record --monitor  # start and monitor recording 
+  uv run -m record --monitor  # start and monitor recording. Use --accessibility to capture accessibility info.
   ```
   ```shell
   CTRL+C  # stop recording
