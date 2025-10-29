@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from label.discovery import discover_sessions, discover_video_sessions, create_single_config
 from label.clients import create_client
 from label.processor import Processor
-from label.vllm_server import VLLMServer
 from label.visualizer import Visualizer
 
 load_dotenv()
@@ -30,17 +29,10 @@ def parse_args():
 
     p.add_argument("--client", choices=["gemini", "vllm"], default="gemini")
     p.add_argument("--model", default="")
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=4, help="Number of concurrent workers (set to 1 to disable concurrency)")
 
     vllm_group = p.add_argument_group("vLLM Options")
     vllm_group.add_argument("--vllm-url")
-    vllm_group.add_argument("--vllm-port", type=int, default=8000)
-    vllm_group.add_argument("--tensor-parallel", type=int, default=1)
-    vllm_group.add_argument("--gpu-memory", type=float, default=0.9)
-    vllm_group.add_argument("--max-model-len", type=int)
-    vllm_group.add_argument("--expert-parallel", action="store_true")
-    vllm_group.add_argument("--enforce-eager", action="store_true")
-    vllm_group.add_argument("--startup-timeout", type=int, default=600)
 
     args = p.parse_args()
 
@@ -102,54 +94,24 @@ def process_with_gemini(args, configs):
 
 
 def process_with_vllm(args, configs):
-    if args.vllm_url:
-        client = create_client(
-            'vllm',
-            base_url=args.vllm_url if args.vllm_url.endswith('/v1') else f"{args.vllm_url}/v1",
-            model_name=args.model
-        )
+    client = create_client(
+        'vllm',
+        base_url=args.vllm_url if args.vllm_url.endswith('/v1') else f"{args.vllm_url}/v1",
+        model_name=args.model
+    )
 
-        processor = Processor(
-            client=client,
-            num_workers=args.num_workers,
-            video_only=args.video_only,
-            prompt_file=args.prompt_file,
-        )
+    processor = Processor(
+        client=client,
+        num_workers=args.num_workers,
+        video_only=args.video_only,
+        prompt_file=args.prompt_file,
+    )
 
-        return processor.process_sessions(
-            configs,
-            fps=args.fps,
-            annotate=args.annotate and not args.video_only,
-        )
-    else:
-        with VLLMServer(
-            model_path=args.model,
-            port=args.vllm_port,
-            tensor_parallel=args.tensor_parallel,
-            gpu_memory=args.gpu_memory,
-            max_model_len=args.max_model_len,
-            expert_parallel=args.expert_parallel,
-            startup_timeout=args.startup_timeout,
-            enforce_eager=args.enforce_eager,
-        ) as server:
-            client = create_client(
-                'vllm',
-                base_url=server.get_api_url(),
-                model_name=args.model
-            )
-
-            processor = Processor(
-                client=client,
-                num_workers=args.num_workers,
-                video_only=args.video_only,
-                prompt_file=args.prompt_file,
-            )
-
-            return processor.process_sessions(
-                configs,
-                fps=args.fps,
-                annotate=args.annotate and not args.video_only,
-            )
+    return processor.process_sessions(
+        configs,
+        fps=args.fps,
+        annotate=args.annotate and not args.video_only,
+    )
 
 
 def main():

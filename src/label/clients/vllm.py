@@ -2,8 +2,7 @@ import base64
 import json
 import re
 from pathlib import Path
-from typing import List, Union, Optional, Dict
-from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict
 
 from openai import OpenAI
 from label.clients.client import VLMClient, CAPTION_SCHEMA
@@ -45,7 +44,6 @@ class VLLMClient(VLMClient):
         api_key: str = "EMPTY",
         model_name: str = "default",
         max_tokens: int = 8192,
-        enable_batching: bool = True
     ):
 
         if OpenAI is None:
@@ -54,16 +52,13 @@ class VLLMClient(VLMClient):
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.model_name = model_name
         self.max_tokens = max_tokens
-        self.enable_batching = enable_batching
 
         print(f"[VLLMClient] Connected to {base_url}")
         print(f"[VLLMClient] Model: {model_name}")
-        print(f"[VLLMClient] Batching enabled: {enable_batching}")
 
     def upload_file(self, path: str) -> Dict:
         """
         Register a file and return its descriptor with pre-encoded data.
-        For batch processing, we encode the file once and reuse it.
         """
         p = Path(path)
         if not p.exists():
@@ -82,23 +77,38 @@ class VLLMClient(VLMClient):
             "data_url": data_url,
         }
 
-    def generate(self, prompt: Union[str, List[str]],
-                 file_descriptor: Optional[Union[Dict, List[Dict]]] = None,
-                 schema: Optional[Dict] = None) -> Union[VLLMResponse, List[VLLMResponse]]:
+    def generate(
+        self,
+        prompt: str,
+        file_descriptor: Optional[Dict] = None,
+        schema: Optional[Dict] = None
+    ) -> VLLMResponse:
+        """Generate a response for a single prompt."""
 
         if schema is None:
             schema = CAPTION_SCHEMA
 
-        is_batch = isinstance(prompt, list)
+        messages = self._build_messages(prompt, file_descriptor)
 
-        if is_batch and self.enable_batching:
-            return self._generate_batch(prompt, file_descriptor, schema)
-        elif is_batch:
-            return self._generate_sequential(prompt, file_descriptor, schema)
-        else:
-            return self._generate_single(prompt, file_descriptor, schema)
+        request_params = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": 0.0,
+            "max_tokens": self.max_tokens,
+        }
 
-    def _build_messages(self, prompt: str, file_desc: Optional[Dict]) -> List[Dict]:
+        if schema:
+            request_params["extra_body"] = {"guided_json": schema}
+
+        try:
+            completion = self.client.chat.completions.create(**request_params)
+            content = completion.choices[0].message.content
+            return VLLMResponse(content, completion, schema)
+        except Exception as e:
+            print(f"[VLLMClient] Error during generation: {e}")
+            raise
+
+    def _build_messages(self, prompt: str, file_desc: Optional[Dict]) -> list:
         """Build messages in OpenAI chat format with optional media."""
         if not file_desc:
             return [{"role": "user", "content": prompt}]
@@ -125,104 +135,3 @@ class VLLMClient(VLMClient):
             ]
 
         return [{"role": "user", "content": content}]
-
-    def _generate_single(self, prompt: str, file_desc: Optional[Dict],
-                         schema: Optional[Dict]) -> VLLMResponse:
-        """Process a single prompt with optional file."""
-        messages = self._build_messages(prompt, file_desc)
-
-        request_params = {
-            "model": self.model_name,
-            "messages": messages,
-            "temperature": 0.0,
-            "max_tokens": self.max_tokens,
-        }
-
-        if schema:
-            request_params["extra_body"] = {"guided_json": schema}
-
-        try:
-            completion = self.client.chat.completions.create(**request_params)
-            content = completion.choices[0].message.content
-            return VLLMResponse(content, completion, schema)
-        except Exception as e:
-            print(f"[VLLMClient] Error during generation: {e}")
-            raise
-
-    def _generate_batch(
-        self, prompts: List[str],
-        file_descs: Optional[List[Dict]],
-        schema: Optional[Dict]
-    ) -> List[VLLMResponse]:
-        """
-        Process multiple prompts in parallel using ThreadPoolExecutor.
-        This is true batching - all requests are sent concurrently.
-        """
-        if file_descs is None:
-            file_descs = [None] * len(prompts)
-
-        if len(prompts) != len(file_descs):
-            raise ValueError("prompts and file_descriptors must match in length")
-
-        print(f"[VLLMClient] Processing batch of {len(prompts)} samples...")
-
-        request_params = {
-            "model": self.model_name,
-            "temperature": 0.0,
-            "max_tokens": self.max_tokens,
-        }
-
-        if schema:
-            request_params["extra_body"] = {"guided_json": schema}
-
-        responses = []
-
-        with ThreadPoolExecutor(max_workers=len(prompts)) as executor:
-            futures = []
-
-            for prompt, file_desc in zip(prompts, file_descs):
-                messages = self._build_messages(prompt, file_desc)
-                future = executor.submit(
-                    self.client.chat.completions.create,
-                    messages=messages,
-                    **request_params
-                )
-                futures.append(future)
-
-            for future in futures:
-                try:
-                    completion = future.result()
-                    content = completion.choices[0].message.content
-                    responses.append(VLLMResponse(content, completion, schema))
-                except Exception as e:
-                    print(f"[VLLMClient] Error in batch item: {e}")
-                    responses.append(VLLMResponse(f'{{"error": "{str(e)}"}}', None, schema))
-
-        print(f"[VLLMClient] Batch completed: {len(responses)} responses")
-        return responses
-
-    def _generate_sequential(
-        self, prompts: List[str],
-        file_descs: Optional[List[Dict]],
-        schema: Optional[Dict]
-    ) -> List[VLLMResponse]:
-        """Process multiple prompts sequentially (fallback method)."""
-        if file_descs is None:
-            file_descs = [None] * len(prompts)
-
-        if len(prompts) != len(file_descs):
-            raise ValueError("prompts and file_descriptors must match in length")
-
-        print(f"[VLLMClient] Processing {len(prompts)} samples sequentially...")
-
-        responses = []
-        for i, (prompt, file_desc) in enumerate(zip(prompts, file_descs)):
-            try:
-                response = self._generate_single(prompt, file_desc, schema)
-                responses.append(response)
-            except Exception as e:
-                print(f"[VLLMClient] Error on sample {i + 1}: {e}")
-                responses.append(VLLMResponse(f'{{"error": "{str(e)}"}}', None, schema))
-
-        print(f"[VLLMClient] All {len(prompts)} samples processed")
-        return responses

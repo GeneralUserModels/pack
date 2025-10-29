@@ -17,16 +17,11 @@ class Processor:
         num_workers: int = 4,
         video_only: bool = False,
         prompt_file: str = "prompts/default.txt",
-        batch_size: int = 8,
-        use_batching: bool = False
     ):
-
         self.client = client
         self.num_workers = num_workers
         self.video_only = video_only
         self.prompt = self._load_prompt(prompt_file)
-        self.batch_size = batch_size
-        self.use_batching = use_batching
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
@@ -51,13 +46,9 @@ class Processor:
             else:
                 tasks.extend(self._prepare_standard(config, fps, annotate))
 
-        print(f"[Processor] Processing {len(tasks)} chunks")
-        print(f"[Processor] Mode: {'Batching' if self.use_batching else 'Concurrent'}")
+        print(f"[Processor] Processing {len(tasks)} chunks with {min(self.num_workers, len(tasks))} concurrent workers")
 
-        if self.use_batching:
-            results = self._process_with_batching(tasks)
-        else:
-            results = self._process_with_workers(tasks)
+        results = self._process_tasks(tasks)
 
         return self._save_results(results, configs, fps)
 
@@ -142,8 +133,8 @@ class Processor:
 
         return tasks
 
-    def _process_with_workers(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
-        """Process using concurrent workers (non-batched mode)."""
+    def _process_tasks(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
+        """Process tasks with configurable concurrency using num_workers."""
         results = []
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
@@ -162,46 +153,6 @@ class Processor:
                         print(f"\n[Error] {task.session_id}/chunk_{task.chunk_index}: {e}")
                         results.append((task, {"error": str(e)}))
                     pbar.update(1)
-
-        return results
-
-    def _process_with_batching(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
-        """Process using batch generation (vLLM batching)."""
-        results = []
-
-        for i in tqdm(range(0, len(tasks), self.batch_size), desc="Processing batches"):
-            batch = tasks[i:i + self.batch_size]
-
-            prompts = [task.prompt for task in batch]
-            file_descriptors = []
-
-            for task in batch:
-                try:
-                    file_desc = self.client.upload_file(str(task.video_path.resolve()))
-                    file_descriptors.append(file_desc)
-                except Exception as e:
-                    print(f"\n[Warning] Upload failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
-                    file_descriptors.append(None)
-
-            try:
-                responses = self.client.generate(
-                    prompts,
-                    file_descriptor=file_descriptors,
-                    schema=CAPTION_SCHEMA
-                )
-
-                for task, resp in zip(batch, responses):
-                    try:
-                        body = resp.json if not callable(resp.json) else resp.json()
-                        results.append((task, body))
-                    except Exception as e:
-                        print(f"\n[Error] Parse failed for {task.session_id}/chunk_{task.chunk_index}: {e}")
-                        results.append((task, {"error": str(e)}))
-
-            except Exception as e:
-                print(f"\n[Error] Batch processing failed: {e}")
-                for task in batch:
-                    results.append((task, {"error": str(e)}))
 
         return results
 
