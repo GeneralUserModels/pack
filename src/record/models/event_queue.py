@@ -198,10 +198,11 @@ class EventQueue:
             is_start=True,
             screenshot=screenshot,
             screenshot_path=None,
-            screenshot_timestamp=screenshot.timestamp if screenshot else None,
+            screenshot_timestamp=screenshot.timestamp,
             end_screenshot_timestamp=None,
             monitor=screenshot.monitor_dict,
-            burst_id=burst_id
+            burst_id=burst_id,
+            scale_factor=screenshot.scale_factor
         )
 
         self.active_bursts[burst_id] = {
@@ -245,10 +246,11 @@ class EventQueue:
                 is_start=False,
                 screenshot=screenshot,
                 screenshot_path=None,
-                screenshot_timestamp=screenshot.timestamp if screenshot else None,
+                screenshot_timestamp=screenshot.timestamp,
                 end_screenshot_timestamp=None,
                 monitor=screenshot.monitor_dict,
-                burst_id=burst_id
+                burst_id=burst_id,
+                scale_factor=screenshot.scale_factor
             )
 
             burst['end_request'] = end_request

@@ -207,7 +207,7 @@ def annotate_image(
         prev_pos = curr_pos
 
     if len(movements) >= 1:
-        draw_arrow(draw, img.size, movements[0]['start'], movements[-1]['end'], monitor, scale, x_offset, y_offset)
+        draw_arrow(draw, img.size, movements[0]['start'], movements[-1]['end'], monitor, scale * agg.scale_factor, x_offset, y_offset)
 
     clicks = [e for e in agg.events if e.is_mouse_event]
     for click in clicks:
@@ -218,7 +218,7 @@ def annotate_image(
         if not is_position_on_monitor(pos, monitor):
             continue
 
-        img_x, img_y = screen_to_image_coords(pos, monitor, scale, x_offset, y_offset)
+        img_x, img_y = screen_to_image_coords(pos, monitor, scale * agg.scale_factor, x_offset, y_offset)
         if 0 <= img_x < img.width and 0 <= img_y < img.height:
             color = BUTTON_COLORS.get(click.details.button, 'yellow')
             radius = int(8 * scale)
@@ -301,7 +301,6 @@ def create_video(
                 img = annotate_image(img, agg, scale, x_off, y_off)
 
                 pending_movement = extract_pending_movement(agg)
-                print(f"Pending movement: {pending_movement}")
 
                 img.save(dst)
             else:
