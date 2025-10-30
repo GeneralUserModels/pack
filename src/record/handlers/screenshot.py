@@ -44,8 +44,7 @@ class ScreenshotHandler:
 
                 try:
                     x, y = self.mouse_controller.position
-                    timestamp = time.time()
-                    screenshot, monitor_index = capture_screenshot(sct, x, y, max_res=self.max_res)
+                    screenshot, monitor_index, timestamp = capture_screenshot(sct, x, y, max_res=self.max_res)
 
                     if screenshot is not None:
                         buffer_image = BufferImage(

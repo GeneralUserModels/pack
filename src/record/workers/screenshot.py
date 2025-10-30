@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from typing import Optional, Tuple
 from PIL import Image
@@ -70,7 +71,9 @@ def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> 
             monitor_index = max_idx
 
         monitor = sct.monitors[monitor_index]
+        time_before = time.time()
         screenshot = sct.grab(monitor)
+        time.after = time.time()
 
         img = np.array(screenshot)
         img_rgb = img[:, :, [2, 1, 0]]
@@ -78,7 +81,7 @@ def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> 
         if max_res is not None:
             img_rgb = _resize_if_needed(img_rgb, max_res)
 
-        return img_rgb, monitor_index
+        return img_rgb, monitor_index, time_before + (time.after - time_before) / 2
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
-        return None, None
+        return None, None, None
