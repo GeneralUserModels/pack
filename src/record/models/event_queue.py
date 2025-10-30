@@ -279,6 +279,7 @@ class EventQueue:
         )
         if candidates:
             return candidates[-1]
+        print(f"Warning: No screenshot found before timestamp {timestamp:.3f}")
         return None
 
     def _find_screenshot_after(self, timestamp: float) -> Optional[Any]:
@@ -289,6 +290,7 @@ class EventQueue:
         )
         if candidates:
             return candidates[0]
+        print(f"Warning: No screenshot found after timestamp {timestamp:.3f}")
         return None
 
     def _save_event_to_jsonl(self, event: InputEvent) -> None:

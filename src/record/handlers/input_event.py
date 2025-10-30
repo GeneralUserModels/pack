@@ -13,7 +13,7 @@ class InputEventHandler:
         self._monitors = list(get_monitors())
         self.accessibility_enabled = accessibility
         self.accessibility_handler = None
-        
+
         if self.accessibility_enabled:
             try:
                 from record.handlers.accessibility import AccessibilityHandler
@@ -64,12 +64,12 @@ class InputEventHandler:
             details={'x': x, 'y': y},
             cursor_position=(x, y)
         )
-        
+
         if self.accessibility_enabled and self.accessibility_handler:
             ax_data = self.accessibility_handler(event)
             if ax_data:
                 event.details.update(ax_data)
-        
+
         self.event_queue.enqueue(event)
 
     def on_click(self, x: int, y: int, button: mouse.Button, pressed: bool) -> None:
@@ -97,12 +97,12 @@ class InputEventHandler:
             },
             cursor_position=(x, y)
         )
-        
+
         if self.accessibility_enabled and self.accessibility_handler:
             ax_data = self.accessibility_handler(event)
             if ax_data:
                 event.details.update(ax_data)
-        
+
         self.event_queue.enqueue(event)
 
     def on_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
@@ -131,12 +131,12 @@ class InputEventHandler:
             },
             cursor_position=(x, y)
         )
-        
+
         if self.accessibility_enabled and self.accessibility_handler:
             ax_data = self.accessibility_handler(event)
             if ax_data:
                 event.details.update(ax_data)
-        
+
         self.event_queue.enqueue(event)
 
     def on_press(self, key) -> None:
@@ -166,12 +166,12 @@ class InputEventHandler:
             details={'key': key_char},
             cursor_position=(x, y)
         )
-        
+
         if self.accessibility_enabled and self.accessibility_handler:
             ax_data = self.accessibility_handler(event)
             if ax_data:
                 event.details.update(ax_data)
-        
+
         self.event_queue.enqueue(event)
 
     def on_release(self, key) -> None:
@@ -201,10 +201,10 @@ class InputEventHandler:
             details={'key': key_char},
             cursor_position=(x, y)
         )
-        
+
         if self.accessibility_enabled and self.accessibility_handler:
             ax_data = self.accessibility_handler(event)
             if ax_data:
                 event.details.update(ax_data)
-        
+
         self.event_queue.enqueue(event)

@@ -84,14 +84,16 @@ class ScreenRecorder:
         self.input_event_queue.set_callback(self._on_aggregation_request)
         self.image_queue.add_callback(self._on_new_image)
 
-        self.input_handler = InputEventHandler(self.input_event_queue, accessibility=accessibility)
-
         self.screenshot_manager = ScreenshotHandler(
             image_queue=self.image_queue,
             fps=self.fps,
             max_res=self.max_res
         )
 
+        self.input_handler = InputEventHandler(
+            self.input_event_queue,
+            accessibility=accessibility
+        )
         self.mouse_listener = None
         self.keyboard_listener = None
 
@@ -163,8 +165,13 @@ class ScreenRecorder:
         print("Input event aggregation: ENABLED (polling worker)")
         print(f"  - Save all images: {self.buffer_all}")
 
-        self.input_event_queue.start()
         self.screenshot_manager.start()
+        self.input_event_queue.start()
+
+        # delay ensuring screenshots exist for first event
+        constants = constants_manager.get()
+        initial_delay = constants.PADDING_BEFORE / 1000.0
+        time.sleep(initial_delay)
 
         self.mouse_listener = mouse.Listener(
             on_move=self.input_handler.on_move,
@@ -179,7 +186,9 @@ class ScreenRecorder:
         )
         self.keyboard_listener.start()
 
+        print("-------------------------------------------------------------------")
         print("Recorder started. Press Ctrl+C to stop.")
+        print("-------------------------------------------------------------------")
 
     def stop(self):
         """Stop recording and process remaining events."""
@@ -297,7 +306,6 @@ def main():
 
     args = parser.parse_args()
 
-    from record.constants import constants_manager
     constants_manager.set_preset(args.precision, verbose=False)
 
     recorder = ScreenRecorder(
