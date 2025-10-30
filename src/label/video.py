@@ -106,40 +106,14 @@ def screen_to_image_coords(screen_pos, monitor, scale, x_offset, y_offset):
 class SyntheticEvent:
     """Synthetic event to represent cross-monitor cursor movement."""
 
-    def __init__(self, cursor_position):
+    def __init__(self, cursor_position, monitor):
         self.cursor_position = cursor_position
+        self.monitor = monitor
         self.is_mouse_event = False
 
 
 def apply_pending_movement(agg: Aggregation, pending_movement: Optional[Tuple]) -> Aggregation:
-    """
-    Apply pending movement from previous frame by prepending synthetic events.
-
-    Args:
-        agg: Current aggregation
-        pending_movement: Tuple of (last_pos, source_monitor) from previous frame
-
-    Returns:
-        Modified aggregation with synthetic events prepended if applicable
-    """
-    if not pending_movement or not agg.monitor or not agg.events:
-        return agg
-
-    prev_pos, prev_monitor = pending_movement
-
-    mpos_events = [e for e in agg.events if e.cursor_position and len(e.cursor_position) >= 2]
-    if not mpos_events:
-        return agg
-
-    first_pos = mpos_events[0].cursor_position
-
-    if is_position_on_monitor(first_pos, agg.monitor):
-        synthetic_events = [
-            SyntheticEvent(prev_pos),
-            SyntheticEvent(first_pos)
-        ]
-
-        agg.events = synthetic_events + agg.events
+    agg.events = pending_movement + agg.events
 
     return agg
 
@@ -155,25 +129,29 @@ def extract_pending_movement(agg: Aggregation) -> Optional[Tuple]:
         Tuple of (last_pos, monitor) if movement exits monitor, None otherwise
     """
     if not agg.monitor or not agg.events:
-        return None
+        return []
 
     monitor = agg.monitor
     mpos_events = [e for e in agg.events if e.cursor_position and len(e.cursor_position) >= 2]
 
     if not mpos_events:
-        return None
+        return []
 
+    pending_events = []
+    next_monitor = None
     for i in range(len(mpos_events) - 1):
-        curr_pos = mpos_events[i].cursor_position
         next_pos = mpos_events[i + 1].cursor_position
-
-        curr_on_monitor = is_position_on_monitor(curr_pos, monitor)
         next_on_monitor = is_position_on_monitor(next_pos, monitor)
 
-        if curr_on_monitor and not next_on_monitor:
-            return (next_pos, monitor)
-
-    return None
+        if not next_on_monitor:
+            if not next_monitor:
+                pending_events.append(mpos_events[i + 1])
+                next_monitor = mpos_events[i + 1].monitor
+            elif next_monitor == mpos_events[i + 1].monitor:
+                pending_events.append(mpos_events[i + 1])
+            else:
+                return pending_events
+    return pending_events
 
 
 def annotate_image(
@@ -279,7 +257,7 @@ def create_video(
     with tempfile.TemporaryDirectory(prefix="video_") as tmpdir:
         tmpdir_path = Path(tmpdir)
 
-        pending_movement = None
+        pending_movement = []
 
         for idx, src in enumerate(image_paths):
             dst = tmpdir_path / f"{idx:06d}.jpg"
@@ -304,7 +282,7 @@ def create_video(
                 img.save(dst)
             else:
                 shutil.copy2(src, dst)
-                pending_movement = None
+                pending_movement = []
 
         vf_parts = []
         if pad_to:
