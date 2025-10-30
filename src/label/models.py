@@ -465,6 +465,8 @@ class SessionConfig:
             if final_aggs and final_aggs[-1].screenshot_path == agg.screenshot_path:
                 combined_agg = final_aggs[-1] + agg
                 final_aggs[-1] = combined_agg
+            else:
+                final_aggs.append(agg)
         return final_aggs
 
     def save_captions(self, captions: List[Caption]):

@@ -200,7 +200,7 @@ class EventQueue:
             screenshot_path=None,
             screenshot_timestamp=screenshot.timestamp if screenshot else None,
             end_screenshot_timestamp=None,
-            monitor=event.monitor,
+            monitor=screenshot.monitor_dict,
             burst_id=burst_id
         )
 
@@ -247,7 +247,7 @@ class EventQueue:
                 screenshot_path=None,
                 screenshot_timestamp=screenshot.timestamp if screenshot else None,
                 end_screenshot_timestamp=None,
-                monitor=(last_event.monitor if last_event is not None else None),
+                monitor=screenshot.monitor_dict,
                 burst_id=burst_id
             )
 
