@@ -110,6 +110,7 @@ def annotate_image(img: Image.Image, agg: Aggregation, scale: float = 1.0,
             movements.append({'start': prev_pos, 'end': event.cursor_position})
         prev_pos = event.cursor_position
 
+    print(f"Drawing movements: {movements}")
     for mv in movements:
         draw_arrow(draw, img.size, mv['start'], mv['end'], monitor, scale, x_offset, y_offset)
 
