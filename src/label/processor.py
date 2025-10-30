@@ -59,24 +59,11 @@ class Processor:
         annotate: bool
     ) -> List[ChunkTask]:
 
-        screenshots = sorted([
-            p for p in config.screenshots_dir.iterdir()
-            if p.suffix.lower() in {'.jpg', '.jpeg', '.png'}
-        ])
-
-        if not screenshots:
-            return []
-
-        timestamps = [self._extract_timestamp(p) for p in screenshots]
-        valid = [(p, t) for p, t in zip(screenshots, timestamps) if t is not None]
-        valid.sort(key=lambda x: x[1])
-
-        image_paths = [p for p, _ in valid]
-        global_start = valid[0][1]
-
+        aggs = config.load_aggregations() if annotate else None
+        image_paths = [Path(agg.screenshot_path) for agg in aggs if agg.screenshot_path and Path(agg.screenshot_path).exists()]
+        global_start = self._extract_timestamp(image_paths[0]) if image_paths else 0.0
         if not config.master_video_path.exists():
             pad_to = compute_max_size(image_paths)
-            aggs = config.load_aggregations() if annotate else None
 
             create_video(
                 image_paths, config.master_video_path, fps=fps,

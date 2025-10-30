@@ -64,7 +64,7 @@ class SaveWorker:
                     img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
                 except Exception:
                     img_bgr = image.screenshot
-                cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
 
             metadata = {
                 'timestamp': image.timestamp,

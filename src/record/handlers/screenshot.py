@@ -41,19 +41,19 @@ class ScreenshotHandler:
         with mss.mss(with_cursor=True) as sct:
             while self._running:
                 start_time = time.time()
-
                 try:
                     x, y = self.mouse_controller.position
-                    timestamp = time.time()
-                    screenshot, monitor_index = capture_screenshot(sct, x, y, max_res=self.max_res)
-
+                    screenshot, monitor_index, timestamp, scale_factor, monitor_dict = capture_screenshot(
+                        sct, x, y, max_res=self.max_res
+                    )
                     if screenshot is not None:
                         buffer_image = BufferImage(
                             timestamp=timestamp,
                             screenshot=screenshot,
-                            monitor_index=monitor_index
+                            monitor_index=monitor_index,
+                            scale_factor=scale_factor,
+                            monitor_dict=monitor_dict
                         )
-
                         self.image_queue.enqueue(buffer_image)
                 except Exception as e:
                     print(f"Error capturing screenshot: {e}")

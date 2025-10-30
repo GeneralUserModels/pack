@@ -67,7 +67,7 @@ def compute_max_size(image_paths: List[Path]) -> Tuple[int, int]:
         except Exception:
             continue
 
-    return (max_w, max_h) if max_w > 0 else (1920, 1200)
+    return (max_w, max_h) if max_w > 0 else (1920, 1080)
 
 
 def scale_and_pad(img: Image.Image, target_w: int, target_h: int) -> Tuple[Image.Image, float, int, int]:
@@ -87,6 +87,15 @@ def scale_and_pad(img: Image.Image, target_w: int, target_h: int) -> Tuple[Image
     return result, scale, x_offset, y_offset
 
 
+def is_position_on_monitor(pos, monitor):
+    """Check if a position is within the bounds of a monitor."""
+    if not pos or len(pos) < 2 or not monitor:
+        return False
+    x, y = pos
+    return (monitor['left'] <= x < monitor['left'] + monitor['width'] and
+            monitor['top'] <= y < monitor['top'] + monitor['height'])
+
+
 def screen_to_image_coords(screen_pos, monitor, scale, x_offset, y_offset):
     x, y = screen_pos
     img_x = (x - monitor['left']) * scale + x_offset
@@ -94,8 +103,64 @@ def screen_to_image_coords(screen_pos, monitor, scale, x_offset, y_offset):
     return int(img_x), int(img_y)
 
 
-def annotate_image(img: Image.Image, agg: Aggregation, scale: float = 1.0,
-                   x_offset: int = 0, y_offset: int = 0) -> Image.Image:
+class SyntheticEvent:
+    """Synthetic event to represent cross-monitor cursor movement."""
+
+    def __init__(self, cursor_position, monitor):
+        self.cursor_position = cursor_position
+        self.monitor = monitor
+        self.is_mouse_event = False
+
+
+def apply_pending_movement(agg: Aggregation, pending_movement: Optional[Tuple]) -> Aggregation:
+    agg.events = pending_movement + agg.events
+
+    return agg
+
+
+def extract_pending_movement(agg: Aggregation) -> Optional[Tuple]:
+    """
+    Extract pending movement if cursor exits the current monitor.
+
+    Args:
+        agg: Current aggregation
+
+    Returns:
+        Tuple of (last_pos, monitor) if movement exits monitor, None otherwise
+    """
+    if not agg.monitor or not agg.events:
+        return []
+
+    monitor = agg.monitor
+    mpos_events = [e for e in agg.events if e.cursor_position and len(e.cursor_position) >= 2]
+
+    if not mpos_events:
+        return []
+
+    pending_events = []
+    next_monitor = None
+    for i in range(len(mpos_events) - 1):
+        next_pos = mpos_events[i + 1].cursor_position
+        next_on_monitor = is_position_on_monitor(next_pos, monitor)
+
+        if not next_on_monitor:
+            if not next_monitor:
+                pending_events.append(mpos_events[i + 1])
+                next_monitor = mpos_events[i + 1].monitor
+            elif next_monitor == mpos_events[i + 1].monitor:
+                pending_events.append(mpos_events[i + 1])
+            else:
+                return pending_events
+    return pending_events
+
+
+def annotate_image(
+    img: Image.Image,
+    agg: Aggregation,
+    scale: float = 1.0,
+    x_offset: int = 0,
+    y_offset: int = 0
+) -> Image.Image:
     if not agg.monitor or not agg.events:
         return img
 
@@ -105,13 +170,21 @@ def annotate_image(img: Image.Image, agg: Aggregation, scale: float = 1.0,
     movements = []
     prev_pos = None
     mpos_events = [e for e in agg.events if e.cursor_position and len(e.cursor_position) >= 2]
-    for event in ([mpos_events[0], mpos_events[-1]] if len(mpos_events) >= 2 else mpos_events):
-        if prev_pos and prev_pos != event.cursor_position:
-            movements.append({'start': prev_pos, 'end': event.cursor_position})
-        prev_pos = event.cursor_position
 
-    for mv in movements:
-        draw_arrow(draw, img.size, mv['start'], mv['end'], monitor, scale, x_offset, y_offset)
+    for event in mpos_events:
+        curr_pos = event.cursor_position
+
+        if prev_pos and prev_pos != curr_pos:
+            prev_on_monitor = is_position_on_monitor(prev_pos, monitor)
+            curr_on_monitor = is_position_on_monitor(curr_pos, monitor)
+
+            if prev_on_monitor and curr_on_monitor:
+                movements.append({'start': prev_pos, 'end': curr_pos})
+
+        prev_pos = curr_pos
+
+    if len(movements) >= 1:
+        draw_arrow(draw, img.size, movements[0]['start'], movements[-1]['end'], monitor, scale * agg.scale_factor, x_offset, y_offset)
 
     clicks = [e for e in agg.events if e.is_mouse_event]
     for click in clicks:
@@ -119,7 +192,10 @@ def annotate_image(img: Image.Image, agg: Aggregation, scale: float = 1.0,
         if not pos or len(pos) < 2:
             continue
 
-        img_x, img_y = screen_to_image_coords(pos, monitor, scale, x_offset, y_offset)
+        if not is_position_on_monitor(pos, monitor):
+            continue
+
+        img_x, img_y = screen_to_image_coords(pos, monitor, scale * agg.scale_factor, x_offset, y_offset)
         if 0 <= img_x < img.width and 0 <= img_y < img.height:
             color = BUTTON_COLORS.get(click.details.button, 'yellow')
             radius = int(8 * scale)
@@ -143,7 +219,7 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
     if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
         return
 
-    line_width = max(1, int(6 * scale))
+    line_width = max(1, int(3 * scale))
     draw.line([(start_x, start_y), (end_x, end_y)], fill='orange', width=line_width)
 
     arrow_length = int(25 * scale)
@@ -166,22 +242,31 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
     )
 
 
-def create_video(image_paths: List[Path], output_path: Path, fps: int = 1,
-                 pad_to: Optional[Tuple[int, int]] = None,
-                 annotate: bool = False,
-                 aggregations: Optional[List[Aggregation]] = None,
-                 session_dir: Optional[Path] = None):
+def create_video(
+    image_paths: List[Path],
+    output_path: Path,
+    fps: int = 1,
+    pad_to: Optional[Tuple[int, int]] = None,
+    annotate: bool = False,
+    aggregations: Optional[List[Aggregation]] = None,
+    session_dir: Optional[Path] = None
+):
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="video_") as tmpdir:
         tmpdir_path = Path(tmpdir)
 
+        pending_movement = []
+
         for idx, src in enumerate(image_paths):
             dst = tmpdir_path / f"{idx:06d}.jpg"
 
             if annotate and aggregations and idx < len(aggregations):
                 agg = aggregations[idx]
+
+                agg = apply_pending_movement(agg, pending_movement)
+
                 img_path = ImagePath(src, session_dir)
                 img = img_path.load()
 
@@ -191,9 +276,13 @@ def create_video(image_paths: List[Path], output_path: Path, fps: int = 1,
                     scale, x_off, y_off = 1.0, 0, 0
 
                 img = annotate_image(img, agg, scale, x_off, y_off)
+
+                pending_movement = extract_pending_movement(agg)
+
                 img.save(dst)
             else:
                 shutil.copy2(src, dst)
+                pending_movement = []
 
         vf_parts = []
         if pad_to:
