@@ -52,36 +52,37 @@ def _resize_if_needed(img_rgb: np.ndarray, max_res) -> np.ndarray:
     return np.asarray(pil_resized)
 
 
-def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> Tuple[Optional[np.ndarray], Optional[int]]:
+def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> Tuple[Optional[np.ndarray], Optional[int], Optional[float], Optional[dict]]:
     """
     Capture a screenshot from sct that contains (x, y).
-    If scale_to_fhd is True, downscale the image to Full HD (landscape 1920x1080 or portrait 1080x1920)
-    while preserving aspect ratio. Returns (img_rgb, monitor_index) or (None, None) on error.
+    Returns (img_rgb, monitor_index, timestamp, scale_factor, monitor_dict) or (None, None, None, None, None) on error.
     """
     try:
         x = int(x)
         y = int(y)
-
         monitor_index = get_active_monitor(x, y, sct)
-
         max_idx = len(sct.monitors) - 1
         if monitor_index < 0:
             monitor_index = 0
         elif monitor_index > max_idx:
             monitor_index = max_idx
-
         monitor = sct.monitors[monitor_index]
+
         time_before = time.time()
         screenshot = sct.grab(monitor)
-        time.after = time.time()
+        time_after = time.time()
 
         img = np.array(screenshot)
         img_rgb = img[:, :, [2, 1, 0]]
 
+        scale_factor = 1.0
         if max_res is not None:
+            h, w = img_rgb.shape[:2]
             img_rgb = _resize_if_needed(img_rgb, max_res)
+            new_h, new_w = img_rgb.shape[:2]
+            scale_factor = new_w / w
 
-        return img_rgb, monitor_index, time_before + (time.after - time_before) / 2
+        return img_rgb, monitor_index, time_before + (time_after - time_before) / 2, scale_factor, monitor
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
-        return None, None, None
+        return None, None, None, None, None

@@ -143,7 +143,7 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
     if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
         return
 
-    line_width = max(1, int(6 * scale))
+    line_width = max(1, int(3 * scale))
     draw.line([(start_x, start_y), (end_x, end_y)], fill='orange', width=line_width)
 
     arrow_length = int(25 * scale)
@@ -166,11 +166,15 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
     )
 
 
-def create_video(image_paths: List[Path], output_path: Path, fps: int = 1,
-                 pad_to: Optional[Tuple[int, int]] = None,
-                 annotate: bool = False,
-                 aggregations: Optional[List[Aggregation]] = None,
-                 session_dir: Optional[Path] = None):
+def create_video(
+    image_paths: List[Path],
+    output_path: Path,
+    fps: int = 1,
+    pad_to: Optional[Tuple[int, int]] = None,
+    annotate: bool = False,
+    aggregations: Optional[List[Aggregation]] = None,
+    session_dir: Optional[Path] = None
+):
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

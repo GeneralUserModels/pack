@@ -177,9 +177,6 @@ class Aggregation:
             deduplicate: Whether to deduplicate consecutive events of same type
             min_count: Minimum consecutive events needed to summarize (when deduplicating)
         """
-        if not deduplicate:
-            return self._to_prompt_original(time)
-
         actions = []
         keys_pressed = []
 
@@ -279,71 +276,6 @@ Actions:
         """
         return prompt
 
-    def _to_prompt_original(self, time):
-        """Original to_prompt implementation without deduplication"""
-        actions = []
-        keys_pressed = []
-
-        for event in self.events:
-            event_type = event.event_type
-
-            if event_type == 'key_press':
-                key = event.details.get('key', 'Key.unknown')
-                key = key.replace("Key.", "") if key and key.startswith("Key.") else key
-                if key:
-                    keys_pressed.append(key)
-
-            elif event_type == 'mouse_down':
-                if keys_pressed:
-                    actions.append(f"Key(s) pressed: {'|'.join(keys_pressed)}")
-                    keys_pressed.clear()
-                button = event.details.get('button', 'Button.unknown')
-                button = button.replace('Button.', '') if button and button.startswith('Button.') else button
-                cursor_pos = event.cursor_position
-                double_click = event.details.get('double_click', False)
-                mouse_str = f"Mouse clicked {button} at {self._click_to_relative(cursor_pos, event.monitor)}"
-                mouse_str += " (double click)" if double_click else ""
-                actions.append(mouse_str)
-
-            elif event_type == 'mouse_scroll':
-                if keys_pressed:
-                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
-                    keys_pressed.clear()
-                scroll_data = event.details.data
-                direction = self._convert_scroll_direction(scroll_data)
-                actions.append(f"Scrolled {direction}")
-
-            elif event_type == 'mouse_move':
-                if keys_pressed:
-                    actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
-                    keys_pressed.clear()
-                cursor_pos = event.cursor_position
-                actions.append(f"Mouse moved to {self._click_to_relative(cursor_pos, event.monitor)}")
-
-        if keys_pressed:
-            actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
-
-        action_list = None
-        if actions:
-            action_list = '\t' + '\n\t'.join([f"{action}" for action in actions])
-        if len(self.events) > 1:
-            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
-            click_end = self._click_to_relative(self.events[-1].cursor_position, self.events[-1].monitor)
-            click_prompt = f"Cursor positions: {click_start} to {click_end}"
-        elif len(self.events) == 1:
-            click_start = self._click_to_relative(self.events[0].cursor_position, self.events[0].monitor)
-            click_prompt = f"Cursor position: {click_start}"
-        else:
-            click_prompt = ""
-
-        prompt = f"""
-{time} Event:
-{click_prompt}
-Actions:
-{''.join(action_list) if action_list else 'No actions recorded.'}
-        """
-        return prompt
-
     def get_image_path(self, session_dir: Path) -> Optional[ImagePath]:
         if not self.screenshot_path:
             return None
@@ -374,6 +306,23 @@ Actions:
         else:
             direction_str = "no scroll"
         return direction_str
+
+    def __add__(self, other: Aggregation) -> Aggregation:
+        first_agg = self if self.timestamp <= other.timestamp else other
+        last_agg = other if first_agg is self else self
+        combined_events = self.events + other.events
+        combined_events.sort(key=lambda e: e.timestamp)
+        return Aggregation(
+            timestamp=first_agg.timestamp,
+            end_timestamp=last_agg.end_timestamp,
+            reason=last_agg.reason,
+            event_type=last_agg.event_type,
+            is_start=first_agg.is_start,
+            screenshot_path=first_agg.screenshot_path,
+            events=combined_events,
+            monitor=last_agg.monitor,
+            burst_id=last_agg.burst_id,
+        )
 
 
 @dataclass
@@ -510,7 +459,13 @@ class SessionConfig:
             for line in f:
                 if line.strip():
                     aggs.append(Aggregation.from_dict(json.loads(line)))
-        return aggs
+        # add up all aggregations with identical screenshot_paths
+        final_aggs = []
+        for agg in aggs:
+            if final_aggs and final_aggs[-1].screenshot_path == agg.screenshot_path:
+                combined_agg = final_aggs[-1] + agg
+                final_aggs[-1] = combined_agg
+        return final_aggs
 
     def save_captions(self, captions: List[Caption]):
         with open(self.captions_jsonl, 'w', encoding='utf-8') as f:
