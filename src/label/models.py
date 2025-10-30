@@ -124,7 +124,8 @@ class Aggregation:
     screenshot_path: Optional[str]
     events: List[Event]
     monitor: Optional[Dict[str, int]] = None
-    burst_id: Optional[str] = None
+    burst_id: Optional[str] = None,
+    scale_factor: float = 1.0
 
     @classmethod
     def from_dict(cls, data: Dict) -> Aggregation:
@@ -138,7 +139,8 @@ class Aggregation:
             screenshot_path=data.get('screenshot_path'),
             events=events,
             monitor=data.get('monitor'),
-            burst_id=data.get('burst_id')
+            burst_id=data.get('burst_id'),
+            scale_factor=data.get('scale_factor', 1.0)
         )
 
     def to_dict(self) -> Dict:
@@ -151,7 +153,8 @@ class Aggregation:
             'screenshot_path': self.screenshot_path,
             'events': [e.to_dict() for e in self.events],
             'monitor': self.monitor,
-            'burst_id': self.burst_id
+            'burst_id': self.burst_id,
+            'scale_factor': self.scale_factor
         }
 
     def _click_to_relative(self, pos, monitor):
