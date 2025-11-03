@@ -8,7 +8,7 @@ from record.models.event import InputEvent
 class SaveWorker:
     """Worker for saving queue items to disk."""
 
-    def __init__(self, session_dir: Path, buffer_all: bool = False, compilepiletime_quality: int = 70):
+    def __init__(self, session_dir: Path, buffer_all: bool = False, compression_quality: int = 70):
         """
         Initialize the save worker.
 
@@ -27,7 +27,7 @@ class SaveWorker:
 
         self.input_log = self.session_dir / "input_events.jsonl"
         self.screenshot_log = self.session_dir / "screenshots.jsonl"
-        self.compression_quality = compilepiletime_quality
+        self.compression_quality = compression_quality
 
     def save_input_event(self, event: InputEvent) -> None:
         """
