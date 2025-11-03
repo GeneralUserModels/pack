@@ -212,7 +212,7 @@ class ScreenRecorder:
 
         self.input_event_queue.process_all_remaining()
 
-        time.sleep(1.5)
+        time.sleep(2)
 
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=0.1)

@@ -83,6 +83,10 @@ class EventQueue:
         self._running = False
         self._poll_thread = None
 
+        # Added for buffered emission
+        self._ready_heap = []
+        self._ready_counter = itertools.count()
+
     def set_callback(self, callback: Callable[[AggregationRequest], None]) -> None:
         """
         Set the callback function for processing a completed burst.
@@ -243,6 +247,7 @@ class EventQueue:
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
         """Add a request to the pending heap, sorted by timestamp."""
         counter = next(self._pending_counter)
+        setattr(request, "_heap_counter", counter)
         heapq.heappush(self._pending_requests_heap, (request.timestamp, counter, request))
 
     def _save_event_to_jsonl(self, event: InputEvent) -> None:
@@ -287,7 +292,7 @@ class EventQueue:
                 return
 
             constants = constants_manager.get()
-            grace = 0.2
+            grace = 0.5
 
             sorted_items = sorted(self._pending_requests_heap)
 
@@ -340,7 +345,12 @@ class EventQueue:
             else:
                 requests_to_keep.append(sorted_items[-1])
 
-            # Emit ready requests
+            # Print if to emit requests are sorted
+            is_sorted = all(requests_to_emit[i].timestamp <= requests_to_emit[i + 1].timestamp for i in range(len(requests_to_emit) - 1))
+            if not is_sorted:
+                print("Warning: requests_to_emit is not sorted by timestamp")
+
+            # Buffer ready requests in the ready heap instead of direct emission
             for req in requests_to_emit:
                 if req.request_state == "mid" and req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
@@ -354,11 +364,9 @@ class EventQueue:
                         req.monitor = chosen.monitor_dict
                         req.scale_factor = chosen.scale_factor
 
-                if self._callback:
-                    try:
-                        self._callback(req)
-                    except Exception as e:
-                        print(f"Error in request callback: {e}")
+                counter = next(self._ready_counter)
+                add_time = time.time()
+                heapq.heappush(self._ready_heap, (req.screenshot_timestamp, counter, req, add_time))
 
             self._pending_requests_heap = requests_to_keep
             heapq.heapify(self._pending_requests_heap)
@@ -369,6 +377,16 @@ class EventQueue:
             try:
                 self._poll_stale_bursts()
                 self._process_ready_requests()
+
+                with self._lock:
+                    while self._ready_heap and time.time() - self._ready_heap[0][3] > 3:
+                        ts, cnt, req, add_time = heapq.heappop(self._ready_heap)
+                        if self._callback:
+                            try:
+                                self._callback(req)
+                            except Exception as e:
+                                print(f"Error in request callback: {e}")
+
                 time.sleep(self.poll_interval)
             except Exception as e:
                 import traceback
@@ -399,17 +417,34 @@ class EventQueue:
                     next_timestamp, _, next_req = sorted_items[i + 1]
                     current_req.end_timestamp = next_req.timestamp
                     current_req.end_screenshot_timestamp = next_req.screenshot_timestamp
+                else:
+                    current_req.end_timestamp = time.time()
 
-                if self._callback:
-                    try:
-                        self._callback(current_req)
-                    except Exception as e:
-                        print(f"Error in final request callback: {e}")
+                if current_req.request_state == "mid" and current_req.screenshot is None:
+                    screenshots = self.image_queue.get_entries_after(current_req.timestamp, milliseconds=0)
+                    if screenshots:
+                        if current_req.monitor_index is not None:
+                            chosen = next((s for s in screenshots if s.monitor_index == current_req.monitor_index), screenshots[0])
+                        else:
+                            chosen = screenshots[0]
+                        current_req.screenshot = chosen
+                        current_req.screenshot_timestamp = chosen.timestamp
+                        current_req.monitor = chosen.monitor_dict
+                        current_req.scale_factor = chosen.scale_factor
 
-            # Clear heap
+                counter = next(self._ready_counter)
+                add_time = time.time()
+                heapq.heappush(self._ready_heap, (current_req.screenshot_timestamp, counter, current_req, add_time))
+
+                while self._ready_heap:
+                    ts, cnt, req, add_time = heapq.heappop(self._ready_heap)
+                    if self._callback:
+                        try:
+                            self._callback(req)
+                        except Exception as e:
+                            print(f"Error in request callback: {e}")
+
             self._pending_requests_heap.clear()
-
-            # Clear aggregations
             for queue in self.aggregations.values():
                 queue.clear()
 
