@@ -171,6 +171,39 @@ class Aggregation:
             relative_y = round((y / height) * 1_000)
             return (relative_x, relative_y)
 
+    def _reorder_move_scroll_blocks(self, events: List[Event]) -> List[Event]:
+        """
+        For each contiguous block that contains only 'mouse_move' and 'mouse_scroll' events,
+        return the block with all 'mouse_scroll' events first (original relative order preserved),
+        then all 'mouse_move' events (original relative order preserved).
+        Other events are left in place.
+        """
+        if not events:
+            return []
+
+        out: List[Event] = []
+        i = 0
+        n = len(events)
+        while i < n:
+            ev = events[i]
+            if ev.event_type in ("mouse_move", "mouse_scroll"):
+                # gather contiguous block of only move/scroll
+                j = i
+                block = []
+                while j < n and events[j].event_type in ("mouse_move", "mouse_scroll"):
+                    block.append(events[j])
+                    j += 1
+                # re-order: all scrolls (preserve order) then all moves (preserve order)
+                scrolls = [b for b in block if b.event_type == "mouse_scroll"]
+                moves = [b for b in block if b.event_type == "mouse_move"]
+                out.extend(scrolls)
+                out.extend(moves)
+                i = j
+            else:
+                out.append(ev)
+                i += 1
+        return out
+
     def to_prompt(self, time, deduplicate=True, min_count=3):
         """
         Generate a prompt with optional event deduplication.
@@ -182,10 +215,11 @@ class Aggregation:
         """
         actions = []
         keys_pressed = []
+        events_for_summary = self._reorder_move_scroll_blocks(self.events)
 
         # Group consecutive events by type
         i = 0
-        while i < len(self.events):
+        while i < len(events_for_summary):
             event = self.events[i]
             event_type = event.event_type
 

@@ -287,7 +287,7 @@ class EventQueue:
                 return
 
             constants = constants_manager.get()
-            grace = 0.1
+            grace = 0.2
 
             sorted_items = sorted(self._pending_requests_heap)
 
