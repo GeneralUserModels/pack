@@ -204,6 +204,7 @@ class EventQueue:
             screenshot_timestamp=screenshot.timestamp if screenshot else None,
             end_screenshot_timestamp=None,
             monitor=screenshot.monitor_dict if screenshot else None,
+            monitor_index=event.monitor_index,
             burst_id=current_burst_id,
             scale_factor=screenshot.scale_factor if screenshot else None
         )
@@ -307,12 +308,19 @@ class EventQueue:
             # Emit ready requests
             for req in requests_to_emit:
                 if req.request_state == "mid":
-                    screenshot = self.image_queue.get_entries_after(req.timestamp, milliseconds=self.excact_padding)
+                    screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
+                    if "monitor_switch" in req.reason and screenshots:
+                        screenshot = next(
+                            (s for s in screenshots if s.monitor_index == req.monitor_index),
+                            screenshots[0]
+                        )
+                    elif screenshots:
+                        screenshot = screenshots[0]
                     if screenshot:
-                        req.screenshot = screenshot[0]
-                        req.screenshot_timestamp = screenshot[0].timestamp
-                        req.monitor = screenshot[0].monitor_dict
-                        req.scale_factor = screenshot[0].scale_factor
+                        req.screenshot = screenshot
+                        req.screenshot_timestamp = screenshot.timestamp
+                        req.monitor = screenshot.monitor_dict
+                        req.scale_factor = screenshot.scale_factor
                 if self._callback:
                     try:
                         self._callback(req)

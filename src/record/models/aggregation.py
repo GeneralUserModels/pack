@@ -23,6 +23,7 @@ class AggregationRequest:
     monitor: Optional[dict] = None  # Monitor info at the time of screenshot
     burst_id: Optional[int] = None  # ID of the burst this request belongs to
     scale_factor: float = 1.0  # Scaling factor of the screenshot
+    monitor_index: Optional[int] = None  # Index of the monitor
 
 
 @dataclass
