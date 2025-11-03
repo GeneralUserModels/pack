@@ -9,6 +9,7 @@ from record.monitor.reader import TailReader
 
 MAX_EVENTS = 5000
 MAX_BURSTS = 300
+MAX_SEGMENTS = 1000
 EVENT_Y = {'key': 3, 'click': 2, 'move': 1, 'scroll': 0}
 EVENT_COLOR = {'key': '#8B7FC7', 'click': '#FF6B6B', 'move': '#51CF66', 'scroll': '#FFD43B'}
 MARKER_SIZE = 32
@@ -29,9 +30,11 @@ class RealtimeVisualizer:
         self.aggr_reader = TailReader(aggr_path, from_start=True)
 
         self.events: Deque[Dict] = deque(maxlen=MAX_EVENTS)
-        self.bursts: Deque[Dict] = deque(maxlen=MAX_BURSTS)
+        self.segments: Deque[Dict] = deque(maxlen=MAX_SEGMENTS)  # Store burst segments
+        self.mid_markers: Deque[Dict] = deque(maxlen=MAX_BURSTS * 3)  # Store mid-state markers
 
-        self.pending_starts: Dict[str, List[Dict]] = defaultdict(list)
+        # Track pending starts and mids by burst_id
+        self.pending_by_burst_id: Dict[str, List[Dict]] = {}
 
         self.start_time: Optional[float] = None
         self.last_shown_time: Dict[str, float] = defaultdict(lambda: -float('inf'))
@@ -40,9 +43,8 @@ class RealtimeVisualizer:
         self.interval_ms = int(1000.0 / refresh_hz)
         self.throttle_s = EVENT_THROTTLE_MS / 1000.0
 
-        self._last_burst_count = 0
+        self._last_segment_count = 0
         self._last_event_count = 0
-        self._cached_bursts = {}
 
         self.fig, self.ax = plt.subplots(figsize=(14, 6))
         self.fig.suptitle("Real-time Input Event Visualizer", fontsize=16, fontweight='bold')
@@ -133,7 +135,7 @@ class RealtimeVisualizer:
                 self.events.append(item)
 
     def _process_new_aggrs(self, lines: List[str]):
-        """Aggregations are expected to have fields: timestamp, event_type, request_state (bool)"""
+        """Aggregations are expected to have fields: timestamp, event_type, request_state ('start', 'mid', or 'end'), burst_id"""
         for line in lines:
             ag = self._parse_aggregation_line(line)
             if not ag:
@@ -143,35 +145,101 @@ class RealtimeVisualizer:
                 self.start_time = ts
             etype_raw = ag.get("event_type", "unknown")
             etype = self._coarse_from_type(etype_raw)
-            request_state = ag.get("request_state", 'start')
-            if request_state == 'start':
-                self.pending_starts[etype].append({"timestamp": ts, "raw": ag})
-            else:
-                if self.pending_starts.get(etype):
-                    start = self.pending_starts[etype].pop(0)
-                    burst = {
+            request_state = ag.get("request_state", "").lower()
+            burst_id = ag.get("burst_id", None)
+
+            if not burst_id:
+                # Fallback if burst_id is missing - generate one
+                burst_id = f"{etype}_{ts}"
+
+            if request_state == "start":
+                # Initialize the burst tracking
+                if burst_id not in self.pending_by_burst_id:
+                    self.pending_by_burst_id[burst_id] = []
+                self.pending_by_burst_id[burst_id].append({
+                    "timestamp": ts,
+                    "state": "start",
+                    "event_type": etype,
+                    "raw": ag
+                })
+
+            elif request_state == "mid":
+                # Add mid marker and create segment from last point to here
+                if burst_id in self.pending_by_burst_id:
+                    events = self.pending_by_burst_id[burst_id]
+                    if events:
+                        last_event = events[-1]
+                        # Create segment from last point to this mid point
+                        segment = {
+                            "event_type": etype,
+                            "start_ts": last_event["timestamp"],
+                            "end_ts": ts,
+                            "start_rel": last_event["timestamp"] - self.start_time,
+                            "end_rel": ts - self.start_time,
+                            "duration": ts - last_event["timestamp"],
+                            "burst_id": burst_id
+                        }
+                        self.segments.append(segment)
+
+                    # Add the mid event to tracking
+                    self.pending_by_burst_id[burst_id].append({
+                        "timestamp": ts,
+                        "state": "mid",
                         "event_type": etype,
-                        "start_ts": start["timestamp"],
-                        "end_ts": ts,
-                        "start_rel": start["timestamp"] - self.start_time,
-                        "end_rel": ts - self.start_time,
-                        "duration": ts - start["timestamp"],
-                        "raw_start": start["raw"],
-                        "raw_end": ag
+                        "raw": ag
+                    })
+
+                    # Add mid marker for visual separation
+                    mid_marker = {
+                        "event_type": etype,
+                        "timestamp": ts,
+                        "relative": ts - self.start_time,
+                        "burst_id": burst_id,
+                        "raw": ag
                     }
-                    self.bursts.append(burst)
+                    self.mid_markers.append(mid_marker)
                 else:
-                    burst = {
+                    # Mid without start - treat as standalone marker
+                    mid_marker = {
+                        "event_type": etype,
+                        "timestamp": ts,
+                        "relative": ts - self.start_time,
+                        "burst_id": burst_id,
+                        "raw": ag
+                    }
+                    self.mid_markers.append(mid_marker)
+
+            elif request_state == "end":
+                if burst_id in self.pending_by_burst_id:
+                    events = self.pending_by_burst_id[burst_id]
+                    if events:
+                        last_event = events[-1]
+                        # Create final segment from last point to end
+                        segment = {
+                            "event_type": etype,
+                            "start_ts": last_event["timestamp"],
+                            "end_ts": ts,
+                            "start_rel": last_event["timestamp"] - self.start_time,
+                            "end_rel": ts - self.start_time,
+                            "duration": ts - last_event["timestamp"],
+                            "burst_id": burst_id
+                        }
+                        self.segments.append(segment)
+
+                    # Clean up this burst tracking
+                    del self.pending_by_burst_id[burst_id]
+                else:
+                    # End without start - create a zero-duration segment
+                    segment = {
                         "event_type": etype,
                         "start_ts": ts,
                         "end_ts": ts,
                         "start_rel": ts - self.start_time,
                         "end_rel": ts - self.start_time,
                         "duration": 0.0,
-                        "raw_start": None,
-                        "raw_end": ag
+                        "burst_id": burst_id
                     }
-                    self.bursts.append(burst)
+                    self.segments.append(segment)
 
     def _read_and_update(self):
         ev_lines = self.events_reader.read_new_lines()
@@ -188,8 +256,8 @@ class RealtimeVisualizer:
         now_ts = now_wall
         if self.events:
             now_ts = max(now_ts, self.events[-1]["timestamp"])
-        if self.bursts:
-            now_ts = max(now_ts, max(b["end_ts"] for b in self.bursts))
+        if self.segments:
+            now_ts = max(now_ts, max(s["end_ts"] for s in self.segments))
 
         if self.start_time is None:
             self.start_time = now_ts
@@ -198,7 +266,7 @@ class RealtimeVisualizer:
         window_end_rel = (now_ts - self.start_time)
 
         self._last_event_count = len(self.events)
-        self._last_burst_count = len(self.bursts)
+        self._last_segment_count = len(self.segments)
 
         self.ax.clear()
         self.ax.set_yticks(list(EVENT_Y.values()))
@@ -209,21 +277,35 @@ class RealtimeVisualizer:
         self.ax.set_xlabel("Time (s) relative", fontsize=12, fontweight='bold')
         self.ax.grid(True, axis='x', alpha=0.15, linestyle='--', linewidth=0.5)
 
-        bursts_shown = [b for b in list(self.bursts) if b["end_rel"] >= window_start_rel and b["start_rel"] <= window_end_rel]
-        bursts_shown.sort(key=lambda x: x["start_rel"])
+        # Draw segments (non-overlapping by design since they're tied to burst_id)
+        segments_shown = [s for s in list(self.segments)
+                          if s["end_rel"] >= window_start_rel and s["start_rel"] <= window_end_rel]
+        segments_shown.sort(key=lambda x: x["start_rel"])
 
-        if bursts_shown:
-            for b in bursts_shown:
-                coarse = b["event_type"]
+        if segments_shown:
+            for seg in segments_shown:
+                coarse = seg["event_type"]
                 y = EVENT_Y.get(coarse, -1)
                 col = EVENT_COLOR.get(coarse, "#444444")
 
-                s = max(b["start_rel"], window_start_rel)
-                e = min(b["end_rel"], window_end_rel)
+                s = max(seg["start_rel"], window_start_rel)
+                e = min(seg["end_rel"], window_end_rel)
                 d = e - s
 
                 self.ax.barh([y], [d], left=[s], height=0.65, align='center',
                              color=col, alpha=0.25, edgecolor=col, linewidth=1.2, zorder=1)
+
+        # Draw mid-markers as black vertical lines
+        mid_markers_shown = [m for m in list(self.mid_markers)
+                             if window_start_rel <= m["relative"] <= window_end_rel]
+        for marker in mid_markers_shown:
+            coarse = marker["event_type"]
+            y = EVENT_Y.get(coarse, -1)
+            x = marker["relative"]
+
+            # Draw a vertical black line at the marker position
+            self.ax.plot([x, x], [y - 0.35, y + 0.35],
+                         color='black', linewidth=2, alpha=0.8, zorder=2)
 
         xs = []
         ys = []
@@ -257,7 +339,10 @@ class RealtimeVisualizer:
             if c in event_counts:
                 event_counts[c] += 1
 
-        info = f"Events: {len(self.events)} | Bursts: {len(self.bursts)} | "
+        # Count unique burst_ids currently being tracked
+        active_bursts = len(self.pending_by_burst_id)
+
+        info = f"Events: {len(self.events)} | Segments: {len(self.segments)} | Active: {active_bursts} | "
         info += f"[C]{event_counts['click']} [M]{event_counts['move']} [K]{event_counts['key']} [S]{event_counts['scroll']}"
 
         # Set window title only if using interactive backend

@@ -102,13 +102,6 @@ class EventQueue:
             self._callback = callback
 
     def enqueue(self, event: InputEvent) -> None:
-        """
-        Add an event to all_events and check if it triggers burst boundaries.
-        Captures all three screenshot types alongside event in the aggregation queue.
-
-        Args:
-            event: Input event to add
-        """
         with self._lock:
             self.all_events.append(event)
             self._save_event_to_jsonl(event)
@@ -119,8 +112,6 @@ class EventQueue:
 
             queue = self.aggregations[agg_type]
             config = self.configs[agg_type]
-
-            # Capture all three screenshot types for this event
             screenshots = self._collect_screenshots(event.timestamp)
 
             last_event, last_screenshots = queue[-1] if queue else (None, None)
@@ -130,29 +121,41 @@ class EventQueue:
             gap_ok = (event.timestamp - last_event.timestamp) <= config.gap_threshold if last_event else True
             total_ok = (event.timestamp - first_event.timestamp) <= config.total_threshold if first_event else True
 
-            # Case 1: Queue is empty or gap exceeded --> start new burst (clear queue)
+            # Case 1: Queue is empty or gap exceeded - end previous burst and start new
             if not queue or not gap_ok:
-                reason = Reason.STALE
                 if queue:
-                    self._create_burst_request(last_event, last_screenshots, reason, is_burst_end=True)
+                    # End the previous burst
+                    self._create_burst_request(last_event, last_screenshots, Reason.STALE, is_burst_end=True)
                     queue.clear()
-                self._create_burst_request(event, screenshots, reason, is_burst_end=False)
+
+                # Start new burst
+                self._create_burst_request(event, screenshots, Reason.STALE, is_burst_end=False)
                 queue.append((event, screenshots))
-            # Case 2: Monitor changed or total length exceeded --> start new burst
-            elif monitor_changed or not total_ok:
-                evt = event
-                scr_shots = screenshots
-                remaining_queue = []
-                reason = Reason.MONITOR_SWITCH if monitor_changed else Reason.MAX_LENGTH_EXCEEDED
-                if not monitor_changed:
-                    timestamp_estimate = (first_event.timestamp + last_event.timestamp) / 2
-                    first_half = [(e, s) for e, s in list(queue) if e.timestamp <= timestamp_estimate]
-                    remaining_queue = [(e, s) for e, s in list(queue) if e.timestamp > timestamp_estimate]
-                    evt, scr_shots = first_half[-1]
-                self._create_burst_request(evt, scr_shots, reason, is_burst_end=False)
+
+            # Case 2: Monitor changed - create mid request but continue same burst
+            elif monitor_changed:
+                # Create mid request for the last event (captures the previous monitor state)
+                self._create_burst_request(last_event, last_screenshots, Reason.MONITOR_SWITCH, is_burst_end=False)
+
+                # Continue burst with current event
+                queue.append((event, screenshots))
+
+            # Case 3: Max length exceeded - split burst with mid request
+            elif not total_ok:
+                timestamp_estimate = (first_event.timestamp + last_event.timestamp) / 2
+                first_half = [(e, s) for e, s in list(queue) if e.timestamp <= timestamp_estimate]
+                remaining_queue = [(e, s) for e, s in list(queue) if e.timestamp > timestamp_estimate]
+
+                # Create mid request for the split point
+                mid_event, mid_screenshots = first_half[-1]
+                self._create_burst_request(mid_event, mid_screenshots, Reason.MAX_LENGTH_EXCEEDED, is_burst_end=False)
+
+                # Continue with remaining events in same burst
                 queue.clear()
                 queue.extend(remaining_queue)
-            # Case 3: Continue current burst
+                queue.append((event, screenshots))
+
+            # Case 4: Continue current burst normally
             else:
                 queue.append((event, screenshots))
 
@@ -180,7 +183,7 @@ class EventQueue:
         self,
         event: InputEvent,
         screenshots: EventScreenshots,
-        reason: str,
+        reason: Reason,
         is_burst_end: bool
     ) -> AggregationRequest:
 
@@ -189,44 +192,58 @@ class EventQueue:
         request_state = 'end' if is_burst_end else 'start' if reason == Reason.STALE else 'mid'
         reason_str = f"{event_type}_{request_state}_{reason}"
 
+        # Determine burst_id BEFORE creating request
         if not is_burst_end and reason == Reason.STALE:
+            # Starting a new burst
             self.next_burst_id += 1
-            self.active_bursts[self.next_burst_id] = {
+            current_burst_id = self.next_burst_id
+            self.active_bursts[current_burst_id] = {
                 "event_type": event_type
             }
+        else:
+            # Use existing burst_id for this event type
+            current_burst_id = next(
+                (k for k, v in self.active_bursts.items() if v['event_type'] == event_type),
+                self.next_burst_id  # fallback
+            )
 
         request = AggregationRequest(
             timestamp=event.timestamp,
             end_timestamp=None,
             reason=reason_str,
-            event_type=self.event_type_mapping.get(event.event_type),
+            event_type=event_type,
             request_state=request_state,
             screenshot=screenshot,
             screenshot_path=None,
             screenshot_timestamp=screenshot.timestamp if screenshot else None,
             end_screenshot_timestamp=None,
             monitor=screenshot.monitor_dict if screenshot else None,
-            burst_id=self.next_burst_id,
+            burst_id=current_burst_id,
             scale_factor=screenshot.scale_factor if screenshot else None
         )
 
         self._add_request_to_heap(request)
-        if is_burst_end:
-            id = [k for k, v in self.active_bursts.items() if v['event_type'] == event_type][0]
-            del self.active_bursts[id]
 
-    def _resolve_screenshot(self, screenshots: EventScreenshots, event: InputEvent, reason: str, is_burst_end: bool) -> Optional[Any]:
+        if is_burst_end and current_burst_id in self.active_bursts:
+            del self.active_bursts[current_burst_id]
+
+        return request
+
+    def _resolve_screenshot(self, screenshots: EventScreenshots, event: InputEvent, reason: Reason, is_burst_end: bool) -> Optional[Any]:
         if is_burst_end:
+            # End of burst: use screenshot with padding after
             exact_candidates = self.image_queue.get_entries_after(
                 event.timestamp, milliseconds=constants_manager.get().PADDING_AFTER
             )
             print(f"Selecting end screenshot with padding after for reason: {reason}")
             return exact_candidates[-1] if exact_candidates else None
         elif reason == Reason.STALE:
+            # Start of burst: use screenshot with padding before
             print(f"Selecting start screenshot with padding before for reason: {reason}")
             return screenshots.start
         else:
-            print(f"Selecting exact screenshot for reason: {reason}")
+            # Mid request (MONITOR_SWITCH or MAX_LENGTH_EXCEEDED): use exact screenshot
+            print(f"Selecting exact screenshot for mid request, reason: {reason}")
             return screenshots.exact
 
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
@@ -307,6 +324,7 @@ class EventQueue:
                     requests_to_keep.append((sorted_items[i]))
 
             if not any([v for v in self.aggregations.values()]):
+                sorted_items[-1][2].end_timestamp = time.time()
                 requests_to_emit.append(sorted_items[-1][2])
             else:
                 requests_to_keep.append(sorted_items[-1])
