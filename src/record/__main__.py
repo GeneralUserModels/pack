@@ -23,7 +23,8 @@ class ScreenRecorder:
         buffer_all: bool = False,
         monitor: bool = False,
         max_res: tuple[int, int] = None,
-        accessibility: bool = False
+        accessibility: bool = False,
+        compression_quality: int = 70
     ):
         """
         Initialize the screen recorder.
@@ -74,7 +75,7 @@ class ScreenRecorder:
             session_dir=self.session_dir
         )
 
-        self.save_worker = SaveWorker(self.session_dir, buffer_all)
+        self.save_worker = SaveWorker(self.session_dir, buffer_all, compression_quality=compression_quality)
 
         self.aggregation_worker = AggregationWorker(
             event_queue=self.input_event_queue,
@@ -302,6 +303,12 @@ def main():
         action="store_true",
         help="Enable accessibility info capture (macOS only, may impact performance)"
     )
+    parser.add_argument(
+        "-c", "--compression-quality",
+        type=int,
+        help="JPEG compression quality for saved screenshots (1-100, default: 70)",
+        default=70
+    )
 
     args = parser.parse_args()
 
@@ -313,7 +320,8 @@ def main():
         buffer_all=args.buffer_all_images,
         monitor=args.monitor,
         max_res=args.max_res,
-        accessibility=args.accessibility
+        accessibility=args.accessibility,
+        compression_quality=args.compression_quality
     )
     recorder.run()
 

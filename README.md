@@ -63,6 +63,7 @@ Two main entry points:
 | `-m, --monitor`                  | flag                 | off        | Enable real-time monitoring of the last session |
 | `-r, --max-res <width> <height>` | int int              | none       | Maximal resolution for screenshots              |
 | `-p, --precision`                | `accurate` / `rough` | `accurate` | Precision level for event aggregation (presets) |
+| `-c, --compression-quality`      | int                  | 70         | JPEG compression quality                        |
 
 ### Output
 
