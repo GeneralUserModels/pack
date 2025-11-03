@@ -29,6 +29,7 @@ class EventQueue:
         key_config: Optional[AggregationConfig] = None,
         poll_interval: float = 1.0,
         session_dir: Path = None,
+        excact_padding: float = 20.0
     ):
         """
         Initialize the input event queue.
@@ -44,6 +45,7 @@ class EventQueue:
         """
         self.image_queue = image_queue
         self.session_dir = session_dir
+        self.excact_padding = excact_padding
         self.configs = {
             'click': click_config,
             'move': move_config,
@@ -311,7 +313,7 @@ class EventQueue:
             # Emit ready requests
             for req in requests_to_emit:
                 if req.request_state == "mid":
-                    screenshot = self.image_queue.get_entries_after(req.timestamp, milliseconds=20)
+                    screenshot = self.image_queue.get_entries_after(req.timestamp, milliseconds=self.excact_padding)
                     if screenshot:
                         req.screenshot = screenshot[0]
                         req.screenshot_timestamp = screenshot[0].timestamp
