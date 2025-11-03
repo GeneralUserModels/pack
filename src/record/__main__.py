@@ -120,7 +120,7 @@ class ScreenRecorder:
 
         screenshot_status = "✓" if processed.screenshot else "✗"
         print(f"     {screenshot_status}     | {str(len(processed.events)):8s} |"
-              f"{str(processed.request.timestamp):17s} | {processed.request.reason}")
+              f"{str(processed.request.timestamp):<18} | {processed.request.reason}")
 
         self.processed_aggregations += 1
 

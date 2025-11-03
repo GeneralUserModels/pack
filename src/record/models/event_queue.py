@@ -124,10 +124,17 @@ class EventQueue:
                 self._create_burst_request(event, screenshots, Reason.STALE, is_burst_end=False)
                 queue.append((event, screenshots))
 
-            # Case 2: Monitor changed - create mid request but continue same burst
+            # Case 2: Monitor changed - create mid request with NEW monitor screenshot
             elif monitor_changed:
-                # Create mid request for the last event (captures the previous monitor state)
-                self._create_burst_request(last_event, last_screenshots, Reason.MONITOR_SWITCH, is_burst_end=False)
+                # Create mid request using the CURRENT event's screenshot (new monitor)
+                # This ensures we capture the exact moment of monitor transition
+                self._create_burst_request(
+                    event,
+                    screenshots,  # Use current event's screenshot, not last_event's
+                    Reason.MONITOR_SWITCH,
+                    is_burst_end=False,
+                    monitor_index=event.monitor_index  # Pass the new monitor index
+                )
 
                 # Continue burst with current event
                 queue.append((event, screenshots))
@@ -135,10 +142,21 @@ class EventQueue:
             # Case 3: Max length exceeded - split burst with mid request
             elif not total_ok:
                 timestamp_estimate = (first_event.timestamp + last_event.timestamp) / 2
-                first_half = [(e, s) for e, s in list(queue) if e.timestamp <= timestamp_estimate]
-                remaining_queue = [(e, s) for e, s in list(queue) if e.timestamp > timestamp_estimate]
 
-                # Create mid request for the split point
+                # Find the event closest to the middle timestamp
+                mid_idx = 0
+                min_diff = float('inf')
+                for idx, (e, s) in enumerate(queue):
+                    diff = abs(e.timestamp - timestamp_estimate)
+                    if diff < min_diff:
+                        min_diff = diff
+                        mid_idx = idx
+
+                # Split at the middle event
+                first_half = list(queue)[:mid_idx + 1]
+                remaining_queue = list(queue)[mid_idx + 1:]
+
+                # Use the screenshot from the middle event for the mid request
                 mid_event, mid_screenshots = first_half[-1]
                 self._create_burst_request(mid_event, mid_screenshots, Reason.MAX_LENGTH_EXCEEDED, is_burst_end=False)
 
@@ -168,7 +186,8 @@ class EventQueue:
         event: InputEvent,
         screenshot: Any,
         reason: Reason,
-        is_burst_end: bool
+        is_burst_end: bool,
+        monitor_index: Optional[int] = None  # Add optional monitor_index parameter
     ) -> AggregationRequest:
 
         screenshot = self._resolve_screenshot(screenshot, event, reason, is_burst_end)
@@ -191,6 +210,9 @@ class EventQueue:
                 self.next_burst_id  # fallback
             )
 
+        # Use provided monitor_index if available (for monitor switches)
+        effective_monitor_index = monitor_index if monitor_index is not None else event.monitor_index
+
         request = AggregationRequest(
             timestamp=event.timestamp,
             end_timestamp=None,
@@ -202,7 +224,7 @@ class EventQueue:
             screenshot_timestamp=screenshot.timestamp if screenshot else None,
             end_screenshot_timestamp=None,
             monitor=screenshot.monitor_dict if screenshot else None,
-            monitor_index=event.monitor_index,
+            monitor_index=effective_monitor_index,
             burst_id=current_burst_id,
             scale_factor=screenshot.scale_factor if screenshot else None
         )
@@ -221,9 +243,11 @@ class EventQueue:
                 event.timestamp, milliseconds=constants_manager.get().PADDING_AFTER
             )
             return exact_candidates[-1] if exact_candidates else None
-        elif reason == Reason.STALE:
-            # Start of burst: use screenshot with padding before
+        elif reason in (Reason.STALE, Reason.MONITOR_SWITCH, Reason.MAX_LENGTH_EXCEEDED):
+            # For start and mid states: screenshot is already collected with padding before
+            # or is the exact screenshot we want (for monitor switch and max_length)
             return screenshot
+        return screenshot
 
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
         """Add a request to the pending heap, sorted by timestamp."""
@@ -305,20 +329,23 @@ class EventQueue:
 
             # Emit ready requests
             for req in requests_to_emit:
-                if req.request_state == "mid":
+                if req.request_state == "mid" and req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
-                    if "monitor_switch" in req.reason and screenshots:
-                        screenshot = next(
-                            (s for s in screenshots if s.monitor_index == req.monitor_index),
-                            screenshots[-1]
-                        )
-                    elif screenshots:
-                        screenshot = screenshots[0]
-                    if screenshot:
+                    if screenshots:
+                        # For monitor switches, prefer screenshot from the target monitor
+                        if "monitor_switch" in req.reason:
+                            screenshot = next(
+                                (s for s in screenshots if s.monitor_index == req.monitor_index),
+                                screenshots[0]  # fallback to first available
+                            )
+                        else:
+                            screenshot = screenshots[0]
+
                         req.screenshot = screenshot
                         req.screenshot_timestamp = screenshot.timestamp
                         req.monitor = screenshot.monitor_dict
                         req.scale_factor = screenshot.scale_factor
+
                 if self._callback:
                     try:
                         self._callback(req)
