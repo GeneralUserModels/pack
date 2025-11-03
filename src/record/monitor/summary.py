@@ -103,7 +103,7 @@ def collect_outer_intervals(objects):
     intervals = {cat: [] for cat in CATEGORIES}
     n = len(objects)
     for i, obj in enumerate(objects):
-        if not obj.get("is_start"):
+        if not obj.get("request_state") in ("start", "mid"):
             continue
         typ = obj.get("event_type")
         if typ not in CATEGORIES:
@@ -114,7 +114,7 @@ def collect_outer_intervals(objects):
         end_ts = None
         for j in range(i + 1, n):
             o2 = objects[j]
-            if o2.get("event_type") == typ and not o2.get("is_start"):
+            if o2.get("event_type") == typ and not o2.get("request_state") in ("start", "mid"):
                 end_ts = o2.get("timestamp")
                 break
         if end_ts is not None:

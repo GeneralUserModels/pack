@@ -1,8 +1,6 @@
 import time
 import json
 import ast
-import sys
-import threading
 from collections import deque, defaultdict
 from typing import Deque, Dict, List, Optional
 import warnings
@@ -26,8 +24,7 @@ warnings.filterwarnings(
 class RealtimeVisualizer:
     def __init__(self, events_path: str, aggr_path: str, refresh_hz: int = 10, window_s: float = 30.0):
         import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
-        
+
         self.events_reader = TailReader(events_path, from_start=True)
         self.aggr_reader = TailReader(aggr_path, from_start=True)
 
@@ -136,7 +133,7 @@ class RealtimeVisualizer:
                 self.events.append(item)
 
     def _process_new_aggrs(self, lines: List[str]):
-        """Aggregations are expected to have fields: timestamp, event_type, is_start (bool)"""
+        """Aggregations are expected to have fields: timestamp, event_type, request_state (bool)"""
         for line in lines:
             ag = self._parse_aggregation_line(line)
             if not ag:
@@ -146,8 +143,8 @@ class RealtimeVisualizer:
                 self.start_time = ts
             etype_raw = ag.get("event_type", "unknown")
             etype = self._coarse_from_type(etype_raw)
-            is_start = bool(ag.get("is_start", False))
-            if is_start:
+            request_state = ag.get("request_state", 'start')
+            if request_state == 'start':
                 self.pending_starts[etype].append({"timestamp": ts, "raw": ag})
             else:
                 if self.pending_starts.get(etype):
@@ -268,22 +265,22 @@ class RealtimeVisualizer:
         if plt.get_backend() != 'Agg':
             try:
                 self.fig.canvas.manager.set_window_title("Real-time Input Visualizer")
-            except:
+            except Exception:
                 pass
-        
+
         self.ax.text(0.995, 0.02, info, ha='right', va='bottom', transform=self.fig.transFigure,
                      fontsize=11, alpha=0.8, family='monospace')
 
     def run(self):
         import matplotlib.pyplot as plt
         import matplotlib.animation as animation
-        
+
         self.ani = animation.FuncAnimation(
             self.fig, self._draw, interval=self.interval_ms,
             blit=False, cache_frame_data=False
         )
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-        
+
         # On non-interactive backend, don't call show()
         if plt.get_backend() != 'Agg':
             plt.show()

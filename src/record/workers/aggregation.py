@@ -117,7 +117,7 @@ class AggregationWorker:
                 'timestamp': aggregation.request.timestamp,
                 'reason': aggregation.request.reason,
                 'event_type': aggregation.request.event_type,
-                'is_start': aggregation.request.is_start,
+                'request_state': aggregation.request.request_state,
                 'screenshot_path': aggregation.request.screenshot_path,
                 'screenshot_timestamp': aggregation.request.screenshot_timestamp,
                 'end_screenshot_timestamp': aggregation.request.end_screenshot_timestamp,
