@@ -31,7 +31,7 @@ class RealtimeVisualizer:
 
         self.events: Deque[Dict] = deque(maxlen=MAX_EVENTS)
         self.segments: Deque[Dict] = deque(maxlen=MAX_SEGMENTS)  # Store burst segments
-        self.mid_markers: Deque[Dict] = deque(maxlen=MAX_BURSTS * 3)  # Store mid-state markers
+        self.mid_markers: Deque[Dict] = deque(maxlen=MAX_BURSTS * 3)  # Store mid-state markers (now includes start/end)
 
         # Track pending starts and mids by burst_id
         self.pending_by_burst_id: Dict[str, List[Dict]] = {}
@@ -163,6 +163,17 @@ class RealtimeVisualizer:
                     "raw": ag
                 })
 
+                # Add a start marker for visualization (black vertical line)
+                start_marker = {
+                    "event_type": etype,
+                    "timestamp": ts,
+                    "relative": ts - self.start_time,
+                    "burst_id": burst_id,
+                    "state": "start",
+                    "raw": ag
+                }
+                self.mid_markers.append(start_marker)
+
             elif request_state == "mid":
                 # Add mid marker and create segment from last point to here
                 if burst_id in self.pending_by_burst_id:
@@ -210,6 +221,17 @@ class RealtimeVisualizer:
                     self.mid_markers.append(mid_marker)
 
             elif request_state == "end":
+                # Add an end marker for visualization (black vertical line)
+                end_marker = {
+                    "event_type": etype,
+                    "timestamp": ts,
+                    "relative": ts - self.start_time,
+                    "burst_id": burst_id,
+                    "state": "end",
+                    "raw": ag
+                }
+                self.mid_markers.append(end_marker)
+
                 if burst_id in self.pending_by_burst_id:
                     events = self.pending_by_burst_id[burst_id]
                     if events:
@@ -295,7 +317,7 @@ class RealtimeVisualizer:
                 self.ax.barh([y], [d], left=[s], height=0.65, align='center',
                              color=col, alpha=0.25, edgecolor=col, linewidth=1.2, zorder=1)
 
-        # Draw mid-markers as black vertical lines
+        # Draw mid/start/end markers as black vertical lines
         mid_markers_shown = [m for m in list(self.mid_markers)
                              if window_start_rel <= m["relative"] <= window_end_rel]
         for marker in mid_markers_shown:

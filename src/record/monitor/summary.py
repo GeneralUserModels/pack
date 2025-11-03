@@ -100,33 +100,59 @@ def collect_inner_events_and_counts(objects):
 
 
 def collect_outer_intervals(objects):
+    """
+    Collect intervals and state markers using request_state (start/mid/end).
+    Returns:
+      - intervals: dict category -> list of (start_ts, end_ts) tuples
+      - state_markers: dict category -> list of (timestamp, state) tuples where state is 'start', 'mid', or 'end'
+    """
     intervals = {cat: [] for cat in CATEGORIES}
+    state_markers = {cat: [] for cat in CATEGORIES}
+
+    # Track open intervals by category
+    open_intervals = {cat: None for cat in CATEGORIES}
+
     n = len(objects)
     for i, obj in enumerate(objects):
-        if not obj.get("request_state") in ("start", "mid"):
-            continue
         typ = obj.get("event_type")
         if typ not in CATEGORIES:
             continue
-        start_ts = obj.get("timestamp")
-        if start_ts is None:
+
+        req_state = obj.get("request_state")
+        if not req_state:
             continue
-        end_ts = None
-        for j in range(i + 1, n):
-            o2 = objects[j]
-            if o2.get("event_type") == typ and not o2.get("request_state") in ("start", "mid"):
-                end_ts = o2.get("timestamp")
-                break
-        if end_ts is not None:
-            try:
-                intervals[typ].append((float(start_ts), float(end_ts)))
-            except Exception:
-                continue
-        else:
-            print(f"Warning: no matching end found for start object at ts={start_ts}, type={typ}", file=sys.stderr)
+
+        ts = obj.get("timestamp")
+        if ts is None:
+            continue
+
+        try:
+            fts = float(ts)
+        except Exception:
+            continue
+
+        # Add state marker for visualization
+        state_markers[typ].append((fts, req_state))
+
+        # Handle interval tracking
+        if req_state == "start":
+            # Start a new interval
+            open_intervals[typ] = fts
+        elif req_state == "end":
+            # Close the interval if one is open
+            if open_intervals[typ] is not None:
+                intervals[typ].append((open_intervals[typ], fts))
+                open_intervals[typ] = None
+            else:
+                print(f"Warning: 'end' state without matching 'start' at ts={ts}, type={typ}", file=sys.stderr)
+        # 'mid' states don't affect intervals, just get marked
+
+    # Sort intervals and markers
     for cat in intervals:
         intervals[cat].sort()
-    return intervals
+        state_markers[cat].sort()
+
+    return intervals, state_markers
 
 
 def collect_timestamps_from_events_file(objects):
@@ -219,7 +245,7 @@ def collect_screenshots_from_aggregations(objects):
     return screenshots
 
 
-def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, screenshots, out_path=None):
+def plot_all(events_by_cat, intervals_by_cat, state_markers_by_cat, duplicates_ts, unmatched_ts, screenshots, out_path=None):
     num_rows = len(ALL_PLOTTING_CATEGORIES)
     fig, axes = plt.subplots(nrows=num_rows, ncols=1, sharex=True, figsize=(14, 2.2 * num_rows), constrained_layout=True)
     if num_rows == 1:
@@ -282,7 +308,7 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, scree
             else:
                 ax.plot([], [])
 
-        # shade intervals for the main categories
+        # shade intervals for the main categories (start to end boxes)
         if cat in intervals_by_cat:
             for (s_ts, e_ts) in intervals_by_cat.get(cat, []):
                 s_dt = ts_to_dt(s_ts)
@@ -295,6 +321,15 @@ def plot_all(events_by_cat, intervals_by_cat, duplicates_ts, unmatched_ts, scree
                     linewidth=1.0,
                     zorder=0
                 )
+
+        # draw vertical black lines for state markers (start, mid, end)
+        if cat in state_markers_by_cat:
+            for (ts, state) in state_markers_by_cat.get(cat, []):
+                try:
+                    ts_dt = ts_to_dt(ts)
+                except Exception:
+                    continue
+                ax.axvline(ts_dt, color='black', linestyle='-', linewidth=1.5, alpha=0.8, zorder=4)
 
         ax.set_yticks([])
         ax.set_ylim(-1.0, 1.0)
@@ -317,7 +352,7 @@ def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggre
         print("Warning: no objects parsed from events.jsonl", file=sys.stderr)
 
     events_by_cat, agg_key_counts = collect_inner_events_and_counts(agg_objs)
-    intervals_by_cat = collect_outer_intervals(agg_objs)
+    intervals_by_cat, state_markers_by_cat = collect_outer_intervals(agg_objs)
 
     # collect screenshots (new)
     screenshots = collect_screenshots_from_aggregations(agg_objs)
@@ -348,7 +383,7 @@ def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggre
 
     print("Aggregations inner events per category:")
     for cat in CATEGORIES:
-        print(f"  {cat}: {len(events_by_cat.get(cat, []))} timestamps, {len(intervals_by_cat.get(cat, []))} intervals")
+        print(f"  {cat}: {len(events_by_cat.get(cat, []))} timestamps, {len(intervals_by_cat.get(cat, []))} intervals, {len(state_markers_by_cat.get(cat, []))} state markers")
     print(f"Events.jsonl total timestamps found: {len(raw_event_ts)}")
     print(f"Matched uniquely (present exactly once in aggregations): {len(matched_unique)}")
     print(f"Duplicated in aggregations (present >1 times): {len(dup_timestamps)}")
@@ -361,7 +396,7 @@ def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggre
     plot_duplicates_ts = dup_timestamps
     plot_unmatched_ts = unmatched_sorted
 
-    plot_all(events_by_cat, intervals_by_cat, plot_duplicates_ts, plot_unmatched_ts,
+    plot_all(events_by_cat, intervals_by_cat, state_markers_by_cat, plot_duplicates_ts, plot_unmatched_ts,
              screenshots, out_path=summary_path)
 
 
