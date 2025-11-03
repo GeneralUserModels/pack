@@ -130,7 +130,7 @@ class EventQueue:
                 # This ensures we capture the exact moment of monitor transition
                 self._create_burst_request(
                     event,
-                    screenshots,  # Use current event's screenshot, not last_event's
+                    None,  # Use current event's screenshot, not last_event's
                     Reason.MONITOR_SWITCH,
                     is_burst_end=False,
                     monitor_index=event.monitor_index  # Pass the new monitor index
@@ -295,6 +295,9 @@ class EventQueue:
             if len(self._pending_requests_heap) < 2:
                 return
 
+            constants = constants_manager.get()
+            grace = 0.1  # small extra slack in seconds
+
             sorted_items = sorted(self._pending_requests_heap)
 
             requests_to_emit = []
@@ -305,46 +308,66 @@ class EventQueue:
                 current_timestamp, _, current_req = sorted_items[i]
                 next_timestamp, _, next_req = sorted_items[i + 1]
 
+                # If the "next" request is a mid request and has no screenshot yet,
+                if next_req.request_state == "mid" and next_req.screenshot is None:
+                    # Try to fetch a screenshot after the mid request timestamp (first available)
+                    screenshots = self.image_queue.get_entries_after(next_req.timestamp, milliseconds=0)
+                    if screenshots:
+                        if next_req.monitor_index is not None:
+                            chosen = next((s for s in screenshots if s.monitor_index == next_req.monitor_index), screenshots[0])
+                        else:
+                            chosen = screenshots[0]
+
+                        next_req.screenshot = chosen
+                        next_req.screenshot_timestamp = chosen.timestamp
+                        next_req.monitor = chosen.monitor_dict
+                        next_req.scale_factor = chosen.scale_factor
+                    else:
+                        if time.time() - next_req.timestamp < (constants.PADDING_AFTER + grace):
+                            requests_to_keep.append(sorted_items[i])
+                            continue
+
                 next_ensured = True
                 for request in self._pending_requests_heap:
-                    if request[2].request_state == "end" or request[2].timestamp >= current_timestamp:
+                    r_req = request[2]
+                    if r_req.request_state == "end" or r_req.timestamp >= current_timestamp:
                         continue
-                    config = self.configs[request[2].event_type]
-                    if current_timestamp < request[2].timestamp + config.total_threshold < next_timestamp:
+                    config = self.configs[r_req.event_type]
+                    if current_timestamp < r_req.timestamp + config.total_threshold < next_timestamp:
                         next_ensured = False
                         break
 
                 if next_ensured:
                     current_req.end_timestamp = next_req.timestamp
-                    current_req.end_screenshot_timestamp = next_req.screenshot_timestamp
+                    current_req.end_screenshot_timestamp = getattr(next_req, "screenshot_timestamp", None)
                     requests_to_emit.append(current_req)
                 else:
-                    requests_to_keep.append((sorted_items[i]))
+                    requests_to_keep.append(sorted_items[i])
 
+            # Handle last item: if there are no active aggregations left, finish it now.
             if not any([v for v in self.aggregations.values()]):
-                sorted_items[-1][2].end_timestamp = time.time()
-                requests_to_emit.append(sorted_items[-1][2])
+                # sorted_items[-1] is a tuple; set its end_timestamp = now
+                last_req = sorted_items[-1][2]
+                last_req.end_timestamp = time.time()
+                requests_to_emit.append(last_req)
             else:
+                # keep the last item for now
                 requests_to_keep.append(sorted_items[-1])
 
             # Emit ready requests
             for req in requests_to_emit:
+                # If mid request still misses screenshot, try once more before emitting (best-effort)
                 if req.request_state == "mid" and req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
                     if screenshots:
-                        # For monitor switches, prefer screenshot from the target monitor
-                        if "monitor_switch" in req.reason:
-                            screenshot = next(
-                                (s for s in screenshots if s.monitor_index == req.monitor_index),
-                                screenshots[0]  # fallback to first available
-                            )
+                        if req.monitor_index is not None:
+                            chosen = next((s for s in screenshots if s.monitor_index == req.monitor_index), screenshots[0])
                         else:
-                            screenshot = screenshots[0]
-
-                        req.screenshot = screenshot
-                        req.screenshot_timestamp = screenshot.timestamp
-                        req.monitor = screenshot.monitor_dict
-                        req.scale_factor = screenshot.scale_factor
+                            chosen = screenshots[0]
+                        req.screenshot = chosen
+                        req.screenshot_timestamp = chosen.timestamp
+                        req.monitor = chosen.monitor_dict
+                        req.scale_factor = chosen.scale_factor
 
                 if self._callback:
                     try:
@@ -352,7 +375,7 @@ class EventQueue:
                     except Exception as e:
                         print(f"Error in request callback: {e}")
 
-            # Rebuild heap from requests to keep
+            # Rebuild heap from requests to keep (note: we kept same tuple structure)
             self._pending_requests_heap = requests_to_keep
             heapq.heapify(self._pending_requests_heap)
 
