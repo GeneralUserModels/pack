@@ -221,16 +221,10 @@ class EventQueue:
             exact_candidates = self.image_queue.get_entries_after(
                 event.timestamp, milliseconds=constants_manager.get().PADDING_AFTER
             )
-            print(f"Selecting end screenshot with padding after for reason: {reason}")
             return exact_candidates[-1] if exact_candidates else None
         elif reason == Reason.STALE:
             # Start of burst: use screenshot with padding before
-            print(f"Selecting start screenshot with padding before for reason: {reason}")
             return screenshot
-        else:
-            # Mid request (MONITOR_SWITCH or MAX_LENGTH_EXCEEDED): use exact screenshot
-            print(f"Selecting exact screenshot for mid request, reason: {reason}")
-            # return screenshots.exact
 
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
         """Add a request to the pending heap, sorted by timestamp."""
