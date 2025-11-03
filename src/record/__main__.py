@@ -71,8 +71,7 @@ class ScreenRecorder:
                 total_threshold=constants.KEY_TOTAL_THRESHOLD
             ),
             poll_interval=1.0,
-            session_dir=self.session_dir,
-            excact_padding=constants.EXACT_PADDING
+            session_dir=self.session_dir
         )
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)

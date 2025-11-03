@@ -29,7 +29,6 @@ class EventQueue:
         key_config: Optional[AggregationConfig] = None,
         poll_interval: float = 1.0,
         session_dir: Path = None,
-        excact_padding: float = 20.0
     ):
         """
         Initialize the input event queue.
@@ -45,7 +44,6 @@ class EventQueue:
         """
         self.image_queue = image_queue
         self.session_dir = session_dir
-        self.excact_padding = excact_padding
         self.configs = {
             'click': click_config,
             'move': move_config,
