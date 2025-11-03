@@ -3,18 +3,13 @@ import time
 import heapq
 import itertools
 from pathlib import Path
-from typing import Callable, Optional, Dict, Any, NamedTuple
+from typing import Callable, Optional, Dict, Any
 from enum import StrEnum
 from collections import deque
 from record.models.event import InputEvent, EventType
 from record.models.aggregation import AggregationConfig, AggregationRequest
+from record.models.image_queue import ImageQueue
 from record.constants import constants_manager
-
-
-class EventScreenshots(NamedTuple):
-    """Container for the screenshot types captured when event is enqueued."""
-    start: Optional[Any]  # Screenshot with padding before
-    exact: Optional[Any]  # Screenshot with no padding
 
 
 class Reason(StrEnum):
@@ -27,14 +22,13 @@ class EventQueue:
 
     def __init__(
         self,
-        image_queue: Any,  # ImageQueue instance
+        image_queue: ImageQueue,
         click_config: Optional[AggregationConfig] = None,
         move_config: Optional[AggregationConfig] = None,
         scroll_config: Optional[AggregationConfig] = None,
         key_config: Optional[AggregationConfig] = None,
         poll_interval: float = 1.0,
         session_dir: Path = None,
-        safety_margin: float = 0.5
     ):
         """
         Initialize the input event queue.
@@ -47,11 +41,9 @@ class EventQueue:
             key_config: Configuration for key event aggregation
             poll_interval: Interval in seconds for polling worker
             session_dir: Directory to save events JSONL
-            safety_margin: Safety margin in seconds to avoid async delivery issues
         """
         self.image_queue = image_queue
         self.session_dir = session_dir
-        self.safety_margin = safety_margin
         self.configs = {
             'click': click_config,
             'move': move_config,
@@ -159,7 +151,7 @@ class EventQueue:
             else:
                 queue.append((event, screenshots))
 
-    def _collect_screenshots(self, timestamp: float) -> EventScreenshots:
+    def _collect_screenshots(self, timestamp: float) -> Any:
         constants = constants_manager.get()
 
         start_candidates = self.image_queue.get_entries_before(
@@ -167,27 +159,19 @@ class EventQueue:
         )
         start_screenshot = start_candidates[-1] if start_candidates else None
 
-        exact_candidates = self.image_queue.get_entries_before(
-            timestamp, milliseconds=0
-        )
-        exact_screenshot = exact_candidates[-1] if exact_candidates else None
-
         if not start_screenshot:
             print(f"Warning: No start screenshot found for timestamp {timestamp}")
-        if not exact_screenshot:
-            print(f"Warning: No exact screenshot found for timestamp {timestamp}")
-
-        return EventScreenshots(start=start_screenshot, exact=exact_screenshot)
+        return start_screenshot
 
     def _create_burst_request(
         self,
         event: InputEvent,
-        screenshots: EventScreenshots,
+        screenshot: Any,
         reason: Reason,
         is_burst_end: bool
     ) -> AggregationRequest:
 
-        screenshot = self._resolve_screenshot(screenshots, event, reason, is_burst_end)
+        screenshot = self._resolve_screenshot(screenshot, event, reason, is_burst_end)
         event_type = self.event_type_mapping.get(event.event_type)
         request_state = 'end' if is_burst_end else 'start' if reason == Reason.STALE else 'mid'
         reason_str = f"{event_type}_{request_state}_{reason}"
@@ -229,7 +213,7 @@ class EventQueue:
 
         return request
 
-    def _resolve_screenshot(self, screenshots: EventScreenshots, event: InputEvent, reason: Reason, is_burst_end: bool) -> Optional[Any]:
+    def _resolve_screenshot(self, screenshot: Any, event: InputEvent, reason: Reason, is_burst_end: bool) -> Optional[Any]:
         if is_burst_end:
             # End of burst: use screenshot with padding after
             exact_candidates = self.image_queue.get_entries_after(
@@ -240,11 +224,11 @@ class EventQueue:
         elif reason == Reason.STALE:
             # Start of burst: use screenshot with padding before
             print(f"Selecting start screenshot with padding before for reason: {reason}")
-            return screenshots.start
+            return screenshot
         else:
             # Mid request (MONITOR_SWITCH or MAX_LENGTH_EXCEEDED): use exact screenshot
             print(f"Selecting exact screenshot for mid request, reason: {reason}")
-            return screenshots.exact
+            # return screenshots.exact
 
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
         """Add a request to the pending heap, sorted by timestamp."""
@@ -288,11 +272,6 @@ class EventQueue:
                     self.aggregations[event_type].clear()
 
     def _process_ready_requests(self) -> None:
-        """
-        Process requests that are old enough that the next request is certain.
-        A request is ready when the next request started more than (max_threshold + safety_margin) ago.
-        Always leaves at least one request in the heap (the most recent one).
-        """
         with self._lock:
             if len(self._pending_requests_heap) < 2:
                 return
@@ -331,6 +310,13 @@ class EventQueue:
 
             # Emit ready requests
             for req in requests_to_emit:
+                if req.request_state == "mid":
+                    screenshot = self.image_queue.get_entries_after(req.timestamp, milliseconds=20)
+                    if screenshot:
+                        req.screenshot = screenshot[0]
+                        req.screenshot_timestamp = screenshot[0].timestamp
+                        req.monitor = screenshot[0].monitor_dict
+                        req.scale_factor = screenshot[0].scale_factor
                 if self._callback:
                     try:
                         self._callback(req)
