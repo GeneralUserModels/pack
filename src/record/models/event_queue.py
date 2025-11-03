@@ -29,7 +29,6 @@ class EventQueue:
         key_config: Optional[AggregationConfig] = None,
         poll_interval: float = 1.0,
         session_dir: Path = None,
-        excact_padding: float = 20.0
     ):
         """
         Initialize the input event queue.
@@ -45,7 +44,6 @@ class EventQueue:
         """
         self.image_queue = image_queue
         self.session_dir = session_dir
-        self.excact_padding = excact_padding
         self.configs = {
             'click': click_config,
             'move': move_config,
@@ -126,21 +124,36 @@ class EventQueue:
                 self._create_burst_request(event, screenshots, Reason.STALE, is_burst_end=False)
                 queue.append((event, screenshots))
 
-            # Case 2: Monitor changed - create mid request but continue same burst
+            # Case 2: Monitor changed - create mid request with NEW monitor screenshot
             elif monitor_changed:
-                # Create mid request for the last event (captures the previous monitor state)
-                self._create_burst_request(last_event, last_screenshots, Reason.MONITOR_SWITCH, is_burst_end=False)
+                self._create_burst_request(
+                    event,
+                    None,
+                    Reason.MONITOR_SWITCH,
+                    is_burst_end=False,
+                    monitor_index=event.monitor_index
+                )
 
-                # Continue burst with current event
                 queue.append((event, screenshots))
 
             # Case 3: Max length exceeded - split burst with mid request
             elif not total_ok:
                 timestamp_estimate = (first_event.timestamp + last_event.timestamp) / 2
-                first_half = [(e, s) for e, s in list(queue) if e.timestamp <= timestamp_estimate]
-                remaining_queue = [(e, s) for e, s in list(queue) if e.timestamp > timestamp_estimate]
 
-                # Create mid request for the split point
+                # Find the event closest to the middle timestamp
+                mid_idx = 0
+                min_diff = float('inf')
+                for idx, (e, s) in enumerate(queue):
+                    diff = abs(e.timestamp - timestamp_estimate)
+                    if diff < min_diff:
+                        min_diff = diff
+                        mid_idx = idx
+
+                # Split at the middle event
+                first_half = list(queue)[:mid_idx + 1]
+                remaining_queue = list(queue)[mid_idx + 1:]
+
+                # Use the screenshot from the middle event for the mid request
                 mid_event, mid_screenshots = first_half[-1]
                 self._create_burst_request(mid_event, mid_screenshots, Reason.MAX_LENGTH_EXCEEDED, is_burst_end=False)
 
@@ -170,7 +183,8 @@ class EventQueue:
         event: InputEvent,
         screenshot: Any,
         reason: Reason,
-        is_burst_end: bool
+        is_burst_end: bool,
+        monitor_index: Optional[int] = None
     ) -> AggregationRequest:
 
         screenshot = self._resolve_screenshot(screenshot, event, reason, is_burst_end)
@@ -178,20 +192,19 @@ class EventQueue:
         request_state = 'end' if is_burst_end else 'start' if reason == Reason.STALE else 'mid'
         reason_str = f"{event_type}_{request_state}_{reason}"
 
-        # Determine burst_id BEFORE creating request
         if not is_burst_end and reason == Reason.STALE:
-            # Starting a new burst
             self.next_burst_id += 1
             current_burst_id = self.next_burst_id
             self.active_bursts[current_burst_id] = {
                 "event_type": event_type
             }
         else:
-            # Use existing burst_id for this event type
             current_burst_id = next(
                 (k for k, v in self.active_bursts.items() if v['event_type'] == event_type),
                 self.next_burst_id  # fallback
             )
+
+        effective_monitor_index = monitor_index if monitor_index is not None else event.monitor_index
 
         request = AggregationRequest(
             timestamp=event.timestamp,
@@ -204,6 +217,7 @@ class EventQueue:
             screenshot_timestamp=screenshot.timestamp if screenshot else None,
             end_screenshot_timestamp=None,
             monitor=screenshot.monitor_dict if screenshot else None,
+            monitor_index=effective_monitor_index,
             burst_id=current_burst_id,
             scale_factor=screenshot.scale_factor if screenshot else None
         )
@@ -222,9 +236,9 @@ class EventQueue:
                 event.timestamp, milliseconds=constants_manager.get().PADDING_AFTER
             )
             return exact_candidates[-1] if exact_candidates else None
-        elif reason == Reason.STALE:
-            # Start of burst: use screenshot with padding before
+        elif reason in (Reason.STALE, Reason.MONITOR_SWITCH, Reason.MAX_LENGTH_EXCEEDED):
             return screenshot
+        return screenshot
 
     def _add_request_to_heap(self, request: AggregationRequest) -> None:
         """Add a request to the pending heap, sorted by timestamp."""
@@ -272,6 +286,9 @@ class EventQueue:
             if len(self._pending_requests_heap) < 2:
                 return
 
+            constants = constants_manager.get()
+            grace = 0.1
+
             sorted_items = sorted(self._pending_requests_heap)
 
             requests_to_emit = []
@@ -282,44 +299,67 @@ class EventQueue:
                 current_timestamp, _, current_req = sorted_items[i]
                 next_timestamp, _, next_req = sorted_items[i + 1]
 
+                if next_req.request_state == "mid" and next_req.screenshot is None:
+                    screenshots = self.image_queue.get_entries_after(next_req.timestamp, milliseconds=0)
+                    if screenshots:
+                        if next_req.monitor_index is not None:
+                            chosen = next((s for s in screenshots if s.monitor_index == next_req.monitor_index), screenshots[0])
+                        else:
+                            chosen = screenshots[0]
+
+                        next_req.screenshot = chosen
+                        next_req.screenshot_timestamp = chosen.timestamp
+                        next_req.monitor = chosen.monitor_dict
+                        next_req.scale_factor = chosen.scale_factor
+                    else:
+                        if time.time() - next_req.timestamp < (constants.PADDING_AFTER + grace):
+                            requests_to_keep.append(sorted_items[i])
+                            continue
+
                 next_ensured = True
                 for request in self._pending_requests_heap:
-                    if request[2].request_state == "end" or request[2].timestamp >= current_timestamp:
+                    r_req = request[2]
+                    if r_req.request_state == "end" or r_req.timestamp >= current_timestamp:
                         continue
-                    config = self.configs[request[2].event_type]
-                    if current_timestamp < request[2].timestamp + config.total_threshold < next_timestamp:
+                    config = self.configs[r_req.event_type]
+                    if current_timestamp < r_req.timestamp + config.total_threshold < next_timestamp:
                         next_ensured = False
                         break
 
                 if next_ensured:
                     current_req.end_timestamp = next_req.timestamp
-                    current_req.end_screenshot_timestamp = next_req.screenshot_timestamp
+                    current_req.end_screenshot_timestamp = getattr(next_req, "screenshot_timestamp", None)
                     requests_to_emit.append(current_req)
                 else:
-                    requests_to_keep.append((sorted_items[i]))
+                    requests_to_keep.append(sorted_items[i])
 
             if not any([v for v in self.aggregations.values()]):
-                sorted_items[-1][2].end_timestamp = time.time()
-                requests_to_emit.append(sorted_items[-1][2])
+                last_req = sorted_items[-1][2]
+                last_req.end_timestamp = time.time()
+                requests_to_emit.append(last_req)
             else:
                 requests_to_keep.append(sorted_items[-1])
 
             # Emit ready requests
             for req in requests_to_emit:
-                if req.request_state == "mid":
-                    screenshot = self.image_queue.get_entries_after(req.timestamp, milliseconds=self.excact_padding)
-                    if screenshot:
-                        req.screenshot = screenshot[0]
-                        req.screenshot_timestamp = screenshot[0].timestamp
-                        req.monitor = screenshot[0].monitor_dict
-                        req.scale_factor = screenshot[0].scale_factor
+                if req.request_state == "mid" and req.screenshot is None:
+                    screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
+                    if screenshots:
+                        if req.monitor_index is not None:
+                            chosen = next((s for s in screenshots if s.monitor_index == req.monitor_index), screenshots[0])
+                        else:
+                            chosen = screenshots[0]
+                        req.screenshot = chosen
+                        req.screenshot_timestamp = chosen.timestamp
+                        req.monitor = chosen.monitor_dict
+                        req.scale_factor = chosen.scale_factor
+
                 if self._callback:
                     try:
                         self._callback(req)
                     except Exception as e:
                         print(f"Error in request callback: {e}")
 
-            # Rebuild heap from requests to keep
             self._pending_requests_heap = requests_to_keep
             heapq.heapify(self._pending_requests_heap)
 
@@ -352,7 +392,6 @@ class EventQueue:
                     self._create_burst_request(last_event, last_screenshots, reason=Reason.STALE, is_burst_end=True)
             sorted_items = sorted(self._pending_requests_heap)
 
-            # Emit all requests with proper end_timestamp set
             for i in range(len(sorted_items)):
                 _, _, current_req = sorted_items[i]
 

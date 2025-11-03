@@ -71,8 +71,7 @@ class ScreenRecorder:
                 total_threshold=constants.KEY_TOTAL_THRESHOLD
             ),
             poll_interval=1.0,
-            session_dir=self.session_dir,
-            excact_padding=constants.EXACT_PADDING
+            session_dir=self.session_dir
         )
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
@@ -116,13 +115,12 @@ class ScreenRecorder:
             print(">>>>                    Aggregation Summary                    <<<<")
             print(f">>>> Session Directory: {str(self.session_dir.name):37s} <<<<")
             print("-------------------------------------------------------------------")
-            print("Screenshot | Capture Reason | # Events | Screenshot Path")
+            print("Screenshot | # Events |     Timestamp     | Capture Reason ")
             print("-------------------------------------------------------------------")
 
         screenshot_status = "✓" if processed.screenshot else "✗"
-        path_info = f"{processed.screenshot_path.split('/')[-1]}" if processed.screenshot_path else ""
-        print(f"     {screenshot_status}     | {processed.request.reason:15s}"
-              f"| {str(len(processed.events)):8s} | {path_info}")
+        print(f"     {screenshot_status}     | {str(len(processed.events)):8s} |"
+              f"{str(processed.request.timestamp):<18} | {processed.request.reason}")
 
         self.processed_aggregations += 1
 

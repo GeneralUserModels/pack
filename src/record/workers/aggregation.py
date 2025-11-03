@@ -56,7 +56,6 @@ class AggregationWorker:
             if request.end_screenshot_timestamp is not None:
                 end_ts = request.end_screenshot_timestamp
             else:
-                print(f"  - No end timestamp for burst starting at {start_ts:.3f}, collecting all remaining events.")
                 end_ts = float('inf')
 
             events = self._get_events_between(start_ts, end_ts)

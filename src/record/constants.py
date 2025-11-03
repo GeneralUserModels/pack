@@ -16,7 +16,6 @@ class ConstantsSpec:
     PADDING_BEFORE: int
     PADDING_AFTER: int
     FINAL_PADDING: int
-    EXACT_PADDING: int
 
     @property
     def max_total_threshold(self) -> float:
@@ -42,7 +41,6 @@ PRESETS: Dict[str, ConstantsSpec] = {
         PADDING_BEFORE=75,
         PADDING_AFTER=75,
         FINAL_PADDING=100,
-        EXACT_PADDING=20,
     ),
     "rough": ConstantsSpec(
         CLICK_GAP_THRESHOLD=0.8,
@@ -56,7 +54,6 @@ PRESETS: Dict[str, ConstantsSpec] = {
         PADDING_BEFORE=75,
         PADDING_AFTER=75,
         FINAL_PADDING=100,
-        EXACT_PADDING=20,
     ),
 }
 

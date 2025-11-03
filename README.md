@@ -57,7 +57,7 @@ Two main entry points:
 
 | Flag                             | Type                 | Default    | Description                                     |
 | -------------------------------- | -------------------- | ---------- | ----------------------------------------------- |
-| `-f, --fps`                      | int                  | `16`       | Frames per second to capture                    |
+| `-f, --fps`                      | int                  | `30`       | Frames per second to capture                    |
 | `-s, --buffer-seconds`           | int                  | `12`       | Seconds to keep in buffer                       |
 | `-b, --buffer-all-images`        | flag                 | off        | Save all buffer images to disk                  |
 | `-m, --monitor`                  | flag                 | off        | Enable real-time monitoring of the last session |
@@ -190,7 +190,7 @@ The `record` module captures screenshots and user input events (mouse_move, mous
 
 Key behavior:
 
-* Screenshots are captured at `1 / fps` seconds (default `fps=16` → ~0.0625 s between frames). The recorder maintains a cyclic buffer retaining the last `buffer_seconds` (default 12s → 192 frames at 16 fps). The `--buffer-all-images` (`-b`) flag exports all buffer frames to disk (off by default).
+* Screenshots are captured at `1 / fps` seconds (default `fps=30` → ~0.0625 s between frames). The recorder maintains a cyclic buffer retaining the last `buffer_seconds` (default 12s → 360 frames at 320 fps). The `--buffer-all-images` (`-b`) flag exports all buffer frames to disk (off by default).
 * Input events are categorized into **click**, **move**, **scroll**, and **key** buffers while also appended to a shared chronological buffer (used later for alignment).
 
 Burst detection and aggregation:
