@@ -354,7 +354,8 @@ class EventQueue:
             for req in requests_to_emit:
                 if req.request_state == "mid" and req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
-                    if screenshots:
+                    if not screenshots:
+                        screenshots = self.image_queue.get_entries_before(req.timestamp, milliseconds=0)
                         if req.monitor_index is not None:
                             chosen = next((s for s in screenshots if s.monitor_index == req.monitor_index), screenshots[0])
                         else:
@@ -363,6 +364,11 @@ class EventQueue:
                         req.screenshot_timestamp = chosen.timestamp
                         req.monitor = chosen.monitor_dict
                         req.scale_factor = chosen.scale_factor
+                if not req.screenshot_timestamp:
+                    if req.screenshot_path:
+                        req.timestamp = float(str(Path(req.screenshot_path).name).split("_")[0])
+                    else:
+                        req.screenshot_timestamp = req.timestamp
 
                 counter = next(self._ready_counter)
                 add_time = time.time()
