@@ -422,16 +422,23 @@ class EventQueue:
 
                 if current_req.request_state == "mid" and current_req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(current_req.timestamp, milliseconds=0)
-                    if screenshots:
-                        if current_req.monitor_index is not None:
-                            chosen = next((s for s in screenshots if s.monitor_index == current_req.monitor_index), screenshots[0])
-                        else:
-                            chosen = screenshots[0]
-                        current_req.screenshot = chosen
-                        current_req.screenshot_timestamp = chosen.timestamp
-                        current_req.monitor = chosen.monitor_dict
-                        current_req.scale_factor = chosen.scale_factor
+                    if not screenshots:
+                        screenshots = self.image_queue.get_entries_before(current_req.timestamp, milliseconds=0)
 
+                    if current_req.monitor_index is not None:
+                        chosen = next((s for s in screenshots if s.monitor_index == current_req.monitor_index), screenshots[0])
+                    else:
+                        chosen = screenshots[0]
+                    current_req.screenshot = chosen
+                    current_req.screenshot_timestamp = chosen.timestamp
+                    current_req.monitor = chosen.monitor_dict
+                    current_req.scale_factor = chosen.scale_factor
+
+                if not current_req.screenshot_timestamp:
+                    if current_req.screenshot_path:
+                        current_req.timestamp = float(str(Path(current_req.screenshot_path).name).split("_")[0])
+                    else:
+                        current_req.screenshot_timestamp = current_req.timestamp
                 counter = next(self._ready_counter)
                 add_time = time.time()
                 heapq.heappush(self._ready_heap, (current_req.screenshot_timestamp, counter, current_req, add_time))
