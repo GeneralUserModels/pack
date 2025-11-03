@@ -310,7 +310,7 @@ class EventQueue:
                     if "monitor_switch" in req.reason and screenshots:
                         screenshot = next(
                             (s for s in screenshots if s.monitor_index == req.monitor_index),
-                            screenshots[0]
+                            screenshots[-1]
                         )
                     elif screenshots:
                         screenshot = screenshots[0]
