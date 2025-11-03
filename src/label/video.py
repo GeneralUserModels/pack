@@ -184,7 +184,18 @@ def annotate_image(
         prev_pos = curr_pos
 
     if len(movements) >= 1:
-        draw_arrow(draw, img.size, movements[0]['start'], movements[-1]['end'], monitor, scale * agg.scale_factor, x_offset, y_offset)
+        drawn_indices = []
+        for i, mov in enumerate(movements):
+            was_drawn = draw_arrow(draw, img.size, mov['start'], mov['end'], monitor,
+                                   scale * agg.scale_factor, x_offset, y_offset, draw_head=False, draw_start=(i == 0))
+            if was_drawn:
+                drawn_indices.append(i)
+
+        if drawn_indices:
+            last_idx = drawn_indices[-1]
+            mov = movements[last_idx]
+            draw_arrow(draw, img.size, mov['start'], mov['end'], monitor,
+                       scale * agg.scale_factor, x_offset, y_offset, draw_head=True)
 
     clicks = [e for e in agg.events if e.is_mouse_event]
     for click in clicks:
@@ -196,50 +207,41 @@ def annotate_image(
             continue
 
         img_x, img_y = screen_to_image_coords(pos, monitor, scale * agg.scale_factor, x_offset, y_offset)
-        if 0 <= img_x < img.width and 0 <= img_y < img.height:
-            color = BUTTON_COLORS.get(click.details.button, 'yellow')
-            radius = int(8 * scale)
-            draw.ellipse(
-                [(img_x - radius, img_y - radius), (img_x + radius, img_y + radius)],
-                fill=color, outline='black', width=2
-            )
-
     return img
 
 
-def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_offset):
+def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_offset, draw_head=True, draw_start=False) -> bool:
     start_x, start_y = screen_to_image_coords(start_pos, monitor, scale, x_offset, y_offset)
     end_x, end_y = screen_to_image_coords(end_pos, monitor, scale, x_offset, y_offset)
-
     width, height = img_size
+    marker_size = int(8 * scale)
+    if draw_start:
+        draw.ellipse(
+            [(start_x - marker_size, start_y - marker_size),
+             (start_x + marker_size, start_y + marker_size)],
+            fill='lime', outline='darkgreen', width=2
+        )
     if not (0 <= start_x < width and 0 <= start_y < height and
             0 <= end_x < width and 0 <= end_y < height):
-        return
-
+        return False
     if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
-        return
+        return False
 
     line_width = max(1, int(3 * scale))
     draw.line([(start_x, start_y), (end_x, end_y)], fill='orange', width=line_width)
 
-    arrow_length = int(25 * scale)
-    dx, dy = end_x - start_x, end_y - start_y
-    angle = np.arctan2(dy, dx)
-    arrow_angle_rad = np.radians(40)
+    if draw_head:
+        arrow_length = int(25 * scale)
+        dx, dy = end_x - start_x, end_y - start_y
+        angle = np.arctan2(dy, dx)
+        arrow_angle_rad = np.radians(40)
+        x1 = end_x - arrow_length * np.cos(angle - arrow_angle_rad)
+        y1 = end_y - arrow_length * np.sin(angle - arrow_angle_rad)
+        x2 = end_x - arrow_length * np.cos(angle + arrow_angle_rad)
+        y2 = end_y - arrow_length * np.sin(angle + arrow_angle_rad)
+        draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill='orange', outline='darkorange')
 
-    x1 = end_x - arrow_length * np.cos(angle - arrow_angle_rad)
-    y1 = end_y - arrow_length * np.sin(angle - arrow_angle_rad)
-    x2 = end_x - arrow_length * np.cos(angle + arrow_angle_rad)
-    y2 = end_y - arrow_length * np.sin(angle + arrow_angle_rad)
-
-    draw.polygon([(end_x, end_y), (x1, y1), (x2, y2)], fill='orange', outline='darkorange')
-
-    marker_size = int(8 * scale)
-    draw.ellipse(
-        [(start_x - marker_size, start_y - marker_size),
-         (start_x + marker_size, start_y + marker_size)],
-        fill='lime', outline='darkgreen', width=2
-    )
+    return True
 
 
 def create_video(
