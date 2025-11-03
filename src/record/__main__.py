@@ -18,7 +18,7 @@ class ScreenRecorder:
 
     def __init__(
         self,
-        fps: int = 16,
+        fps: int = 30,
         buffer_seconds: int = 12,
         buffer_all: bool = False,
         monitor: bool = False,
@@ -71,7 +71,8 @@ class ScreenRecorder:
                 total_threshold=constants.KEY_TOTAL_THRESHOLD
             ),
             poll_interval=1.0,
-            session_dir=self.session_dir
+            session_dir=self.session_dir,
+            excact_padding=constants.EXACT_PADDING
         )
 
         self.save_worker = SaveWorker(self.session_dir, buffer_all)
@@ -265,7 +266,7 @@ def main():
     parser.add_argument(
         "-f", "--fps",
         type=int,
-        default=16,
+        default=30,
         help="Frames per second to capture (default: 16)"
     )
     parser.add_argument(

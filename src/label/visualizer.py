@@ -6,7 +6,7 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
-from label.video import annotate_image, scale_and_pad
+from label.video import annotate_image, scale_and_pad, apply_pending_movement, extract_pending_movement
 from label.models import Aggregation
 
 
@@ -90,6 +90,9 @@ class Visualizer:
         with tempfile.TemporaryDirectory(prefix="viz_") as tmpdir:
             tmpdir_path = Path(tmpdir)
 
+            # Initialize pending movement tracking
+            pending_movement = []
+
             for idx, (img, entry) in enumerate(tqdm(loaded, desc="Annotating")):
                 # Scale and pad the image
                 canvas, scale, x_offset, y_offset = scale_and_pad(img, target_w, target_h)
@@ -98,8 +101,20 @@ class Visualizer:
                 if self.annotate:
                     aggregations = self._reconstruct_aggregations(entry)
                     if aggregations:
-                        # Use the first aggregation for visual annotation
-                        canvas = annotate_image(canvas, aggregations[0], scale, x_offset, y_offset)
+                        # Apply pending movement from previous frame
+                        agg = apply_pending_movement(aggregations[0], pending_movement)
+
+                        # Use the aggregation with pending movements for visual annotation
+                        canvas = annotate_image(canvas, agg, scale, x_offset, y_offset)
+
+                        # Extract pending movement for next frame
+                        pending_movement = extract_pending_movement(agg)
+                    else:
+                        # Reset pending movement if no aggregations
+                        pending_movement = []
+                else:
+                    # Reset pending movement if annotation is disabled
+                    pending_movement = []
 
                 # Add text overlays
                 annotated = self._add_text_overlays(canvas, entry, deduplicate_events, min_event_count)
@@ -125,7 +140,7 @@ class Visualizer:
                 'end_timestamp': entry.get('end_time', 0),
                 'reason': 'reconstructed',
                 'event_type': 'mixed',
-                'is_start': True,
+                'request_state': True,
                 'screenshot_path': entry.get('img'),
                 'events': raw_events,
                 'monitor': raw_events[0].get('monitor') if raw_events else None

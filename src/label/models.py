@@ -120,7 +120,7 @@ class Aggregation:
     end_timestamp: Optional[float]
     reason: str
     event_type: str
-    is_start: bool
+    request_state: bool
     screenshot_path: Optional[str]
     events: List[Event]
     monitor: Optional[Dict[str, int]] = None
@@ -135,7 +135,7 @@ class Aggregation:
             end_timestamp=data.get('end_timestamp'),
             reason=data['reason'],
             event_type=data['event_type'],
-            is_start=data['is_start'],
+            request_state=data['request_state'],
             screenshot_path=data.get('screenshot_path'),
             events=events,
             monitor=data.get('monitor'),
@@ -149,7 +149,7 @@ class Aggregation:
             'end_timestamp': self.end_timestamp,
             'reason': self.reason,
             'event_type': self.event_type,
-            'is_start': self.is_start,
+            'request_state': self.request_state,
             'screenshot_path': self.screenshot_path,
             'events': [e.to_dict() for e in self.events],
             'monitor': self.monitor,
@@ -320,7 +320,7 @@ Actions:
             end_timestamp=last_agg.end_timestamp,
             reason=last_agg.reason,
             event_type=last_agg.event_type,
-            is_start=first_agg.is_start,
+            request_state=first_agg.request_state,
             screenshot_path=first_agg.screenshot_path,
             events=combined_events,
             monitor=last_agg.monitor,

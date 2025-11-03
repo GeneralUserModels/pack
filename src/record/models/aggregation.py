@@ -15,7 +15,7 @@ class AggregationRequest:
     end_timestamp: Optional[float]
     reason: str  # e.g., "key_start", "mouse_move_end"
     event_type: str  # e.g., "key", "move"
-    is_start: bool  # True for start, False for end
+    request_state: str  # burst start, mid or end
     screenshot: Optional[Any] = None  # Screenshot object from ImageQueue
     screenshot_path: Optional[str] = None  # Path to saved screenshot
     screenshot_timestamp: Optional[float] = None  # Timestamp of the screenshot
