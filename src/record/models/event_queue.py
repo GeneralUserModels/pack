@@ -126,17 +126,14 @@ class EventQueue:
 
             # Case 2: Monitor changed - create mid request with NEW monitor screenshot
             elif monitor_changed:
-                # Create mid request using the CURRENT event's screenshot (new monitor)
-                # This ensures we capture the exact moment of monitor transition
                 self._create_burst_request(
                     event,
-                    None,  # Use current event's screenshot, not last_event's
+                    None,
                     Reason.MONITOR_SWITCH,
                     is_burst_end=False,
-                    monitor_index=event.monitor_index  # Pass the new monitor index
+                    monitor_index=event.monitor_index
                 )
 
-                # Continue burst with current event
                 queue.append((event, screenshots))
 
             # Case 3: Max length exceeded - split burst with mid request
@@ -187,7 +184,7 @@ class EventQueue:
         screenshot: Any,
         reason: Reason,
         is_burst_end: bool,
-        monitor_index: Optional[int] = None  # Add optional monitor_index parameter
+        monitor_index: Optional[int] = None
     ) -> AggregationRequest:
 
         screenshot = self._resolve_screenshot(screenshot, event, reason, is_burst_end)
@@ -195,22 +192,18 @@ class EventQueue:
         request_state = 'end' if is_burst_end else 'start' if reason == Reason.STALE else 'mid'
         reason_str = f"{event_type}_{request_state}_{reason}"
 
-        # Determine burst_id BEFORE creating request
         if not is_burst_end and reason == Reason.STALE:
-            # Starting a new burst
             self.next_burst_id += 1
             current_burst_id = self.next_burst_id
             self.active_bursts[current_burst_id] = {
                 "event_type": event_type
             }
         else:
-            # Use existing burst_id for this event type
             current_burst_id = next(
                 (k for k, v in self.active_bursts.items() if v['event_type'] == event_type),
                 self.next_burst_id  # fallback
             )
 
-        # Use provided monitor_index if available (for monitor switches)
         effective_monitor_index = monitor_index if monitor_index is not None else event.monitor_index
 
         request = AggregationRequest(
@@ -244,8 +237,6 @@ class EventQueue:
             )
             return exact_candidates[-1] if exact_candidates else None
         elif reason in (Reason.STALE, Reason.MONITOR_SWITCH, Reason.MAX_LENGTH_EXCEEDED):
-            # For start and mid states: screenshot is already collected with padding before
-            # or is the exact screenshot we want (for monitor switch and max_length)
             return screenshot
         return screenshot
 
@@ -296,7 +287,7 @@ class EventQueue:
                 return
 
             constants = constants_manager.get()
-            grace = 0.1  # small extra slack in seconds
+            grace = 0.1
 
             sorted_items = sorted(self._pending_requests_heap)
 
@@ -308,9 +299,7 @@ class EventQueue:
                 current_timestamp, _, current_req = sorted_items[i]
                 next_timestamp, _, next_req = sorted_items[i + 1]
 
-                # If the "next" request is a mid request and has no screenshot yet,
                 if next_req.request_state == "mid" and next_req.screenshot is None:
-                    # Try to fetch a screenshot after the mid request timestamp (first available)
                     screenshots = self.image_queue.get_entries_after(next_req.timestamp, milliseconds=0)
                     if screenshots:
                         if next_req.monitor_index is not None:
@@ -344,19 +333,15 @@ class EventQueue:
                 else:
                     requests_to_keep.append(sorted_items[i])
 
-            # Handle last item: if there are no active aggregations left, finish it now.
             if not any([v for v in self.aggregations.values()]):
-                # sorted_items[-1] is a tuple; set its end_timestamp = now
                 last_req = sorted_items[-1][2]
                 last_req.end_timestamp = time.time()
                 requests_to_emit.append(last_req)
             else:
-                # keep the last item for now
                 requests_to_keep.append(sorted_items[-1])
 
             # Emit ready requests
             for req in requests_to_emit:
-                # If mid request still misses screenshot, try once more before emitting (best-effort)
                 if req.request_state == "mid" and req.screenshot is None:
                     screenshots = self.image_queue.get_entries_after(req.timestamp, milliseconds=0)
                     if screenshots:
@@ -375,7 +360,6 @@ class EventQueue:
                     except Exception as e:
                         print(f"Error in request callback: {e}")
 
-            # Rebuild heap from requests to keep (note: we kept same tuple structure)
             self._pending_requests_heap = requests_to_keep
             heapq.heapify(self._pending_requests_heap)
 
@@ -408,7 +392,6 @@ class EventQueue:
                     self._create_burst_request(last_event, last_screenshots, reason=Reason.STALE, is_burst_end=True)
             sorted_items = sorted(self._pending_requests_heap)
 
-            # Emit all requests with proper end_timestamp set
             for i in range(len(sorted_items)):
                 _, _, current_req = sorted_items[i]
 
