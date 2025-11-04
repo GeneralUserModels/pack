@@ -70,7 +70,6 @@ def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> 
 
         time_before = time.time()
         screenshot = sct.grab(monitor)
-        time_after = time.time()
 
         img = np.array(screenshot)
         img_rgb = img[:, :, [2, 1, 0]]
@@ -82,7 +81,7 @@ def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> 
             new_h, new_w = img_rgb.shape[:2]
             scale_factor = new_w / w
 
-        return img_rgb, monitor_index, time_before + (time_after - time_before) / 2, scale_factor, monitor
+        return img_rgb, monitor_index, time_before, scale_factor, monitor
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
         return None, None, None, None, None
