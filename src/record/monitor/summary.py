@@ -339,12 +339,12 @@ def plot_all(events_by_cat, intervals_by_cat, state_markers_by_cat, duplicates_t
         print(f"Saved plot to: {out_path}")
 
 
-def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggregations.jsonl"), events_path: Path = Path("events.jsonl"), summary_path: Path = Path("summary.png")):
+def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("raw_aggregations.jsonl"), events_path: Path = Path("events.jsonl"), summary_path: Path = Path("summary.png")):
     agg_objs = read_jsonl(agg_path)
     events_objs = read_jsonl(events_path)
 
     if not agg_objs:
-        print("Warning: no objects parsed from aggregations.jsonl", file=sys.stderr)
+        print("Warning: no objects parsed from raw_aggregations.jsonl", file=sys.stderr)
     if not events_objs:
         print("Warning: no objects parsed from events.jsonl", file=sys.stderr)
 

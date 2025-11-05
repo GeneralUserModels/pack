@@ -12,6 +12,7 @@ from record.workers import SaveWorker, AggregationWorker
 from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer, plot_summary_stats
 from record.constants import constants_manager
+from record.sanitize import sanitize_aggregations
 
 
 class ScreenRecorder:
@@ -149,7 +150,7 @@ class ScreenRecorder:
             print("The visualization window will not be displayed. Consider running without --monitor flag.")
 
         events_path = self.session_dir / "events.jsonl"
-        aggr_path = self.session_dir / "aggregations.jsonl"
+        aggr_path = self.session_dir / "raw_aggregations.jsonl"
         rv = RealtimeVisualizer(events_path, aggr_path, refresh_hz=16, window_s=30.0)
         rv.run()
 
@@ -234,7 +235,7 @@ class ScreenRecorder:
     def _create_summary(self):
         summary_path = self.session_dir / "summary.png"
         print(f"\nSaving summary plot in {summary_path} ...")
-        agg_path = self.session_dir / "aggregations.jsonl"
+        agg_path = self.session_dir / "raw_aggregations.jsonl"
         events_path = self.session_dir / "events.jsonl"
 
         if agg_path.exists() and events_path.exists():
@@ -324,6 +325,7 @@ def main():
         compression_quality=args.compression_quality
     )
     recorder.run()
+    sanitize_aggregations(recorder.session_dir / "raw_aggregations.jsonl")
 
 
 if __name__ == "__main__":

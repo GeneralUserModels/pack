@@ -263,12 +263,11 @@ def create_video(
 
         pending_movement = []
 
-        for idx, src in enumerate(image_paths):
+        for idx, agg in enumerate(aggregations):
+            src = Path(agg.screenshot_path)
             dst = tmpdir_path / f"{idx:06d}.jpg"
 
-            if annotate and aggregations and idx < len(aggregations):
-                agg = aggregations[idx]
-
+            if annotate:
                 agg = apply_pending_movement(agg, pending_movement)
 
                 img_path = ImagePath(src, session_dir)

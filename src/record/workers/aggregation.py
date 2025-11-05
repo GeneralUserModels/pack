@@ -22,7 +22,7 @@ class AggregationWorker:
         self.save_worker = save_worker
         self._lock = threading.RLock()
 
-        self.aggregations_file = save_worker.session_dir / "aggregations.jsonl"
+        self.aggregations_file = save_worker.session_dir / "raw_aggregations.jsonl"
         self.processed_requests = set()
         self.processed_event_timestamps = set()
 
