@@ -498,10 +498,23 @@ class SessionConfig:
             for line in f:
                 if line.strip():
                     aggs.append(Aggregation.from_dict(json.loads(line)))
-        # add up all aggregations with identical screenshot_paths
+
+        def timestamp_from_path(path: str) -> float:
+            try:
+                return float(str(Path(path).name).split('_')[0])
+            except Exception:
+                return 0.0
+
+        def should_merge(agg1: Aggregation, agg2: Aggregation) -> bool:
+            if not agg1.screenshot_path or not agg2.screenshot_path:
+                return True
+            ts1 = timestamp_from_path(agg1.screenshot_path)
+            ts2 = timestamp_from_path(agg2.screenshot_path)
+            return ts1 == ts2
+
         final_aggs = []
         for agg in aggs:
-            if final_aggs and final_aggs[-1].screenshot_path == agg.screenshot_path:
+            if final_aggs and should_merge(final_aggs[-1], agg):
                 combined_agg = final_aggs[-1] + agg
                 final_aggs[-1] = combined_agg
             else:
