@@ -8,7 +8,7 @@ def sanitize_aggregations(input_file: Path):
     and redistributing ALL events to their correct time windows.
     """
     # move filename to filename_raw
-    output_file = input_file.with_name(input_file.stem.replace('_raw', '') + input_file.suffix)
+    output_file = input_file.parent / "aggregations.jsonl"
 
     # Read all records
     records = []
@@ -92,8 +92,6 @@ def sanitize_aggregations(input_file: Path):
             if event_timestamp is None:
                 continue
 
-            # Check if event falls in this window
-            # Use > for start and <= for end to match your requirement
             if pair['start'] < event_timestamp <= pair['end']:
                 matching_events.append(event)
 
@@ -136,9 +134,5 @@ def sanitize_aggregations(input_file: Path):
     print(f"Total events collected: {len(all_events)}")
     print(f"Events assigned to windows: {events_assigned}")
     print(f"Events outside coverage range: {events_outside_range}")
-
-    if events_outside_range > 0:
-        print(f"\nWarning: {events_outside_range} events fall outside the coverage range!")
-        print(f"Coverage: {timestamp_pairs[0]['start']} to {timestamp_pairs[-1]['end']}")
 
     print(f"\nSanitized file saved to: {output_file}")

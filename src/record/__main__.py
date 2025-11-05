@@ -230,6 +230,7 @@ class ScreenRecorder:
             print("✗ Some events were NOT captured in any aggregation")
 
         time.sleep(1)
+        sanitize_aggregations(self.session_dir / "raw_aggregations.jsonl")
         self._create_summary()
 
     def _create_summary(self):
@@ -325,7 +326,6 @@ def main():
         compression_quality=args.compression_quality
     )
     recorder.run()
-    sanitize_aggregations(recorder.session_dir / "raw_aggregations.jsonl")
 
 
 if __name__ == "__main__":
