@@ -131,8 +131,8 @@ class Aggregation:
     def from_dict(cls, data: Dict) -> Aggregation:
         events = [Event.from_dict(e) for e in data.get('events', [])]
         return cls(
-            timestamp=data['screenshot_timestamp'],
-            end_timestamp=data.get('end_screenshot_timestamp'),
+            timestamp=data['screenshot_timestamp'] if 'screenshot_timestamp' in data else data.get('timestamp'),
+            end_timestamp=data['end_screenshot_timestamp'] if 'end_screenshot_timestamp' in data else data.get('end_timestamp'),
             reason=data['reason'],
             event_type=data['event_type'],
             request_state=data['request_state'],
@@ -403,6 +403,7 @@ class MatchedCaption:
     aggregations: List[Aggregation]
     start_index: int
     end_index: int
+    screenshot_scale_factor: float = 1.0
 
     @property
     def image_path(self) -> Optional[str]:
@@ -429,6 +430,7 @@ class MatchedCaption:
             'num_aggregations': len(self.aggregations),
             'start_formatted': self.caption.start_formatted,
             'end_formatted': self.caption.end_formatted,
+            'scale_factor': self.screenshot_scale_factor
         }
 
 

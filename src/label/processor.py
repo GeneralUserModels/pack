@@ -247,7 +247,8 @@ class Processor:
                 caption=caption,
                 aggregations=matched_aggs,
                 start_index=start_idx,
-                end_index=end_idx
+                end_index=end_idx,
+                screenshot_scale_factor=matched_aggs[0].scale_factor if matched_aggs else 1.0
             ))
 
         if matched:
