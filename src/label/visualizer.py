@@ -6,7 +6,7 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
-from label.video import annotate_image, scale_and_pad, apply_pending_movement, extract_pending_movement
+from label.video import annotate_image, scale_and_pad, apply_pending_movement, extract_pending_movement, compute_max_size
 from label.models import Aggregation
 
 
@@ -71,21 +71,20 @@ class Visualizer:
             raise RuntimeError("No valid images found")
 
         loaded = []
-        widths, heights = [], []
+
+        # Compute target size the same way as in processor.py
+        all_image_paths = [p for p, _ in valid_images]
+        target_w, target_h = compute_max_size(all_image_paths)
 
         for p, entry in tqdm(valid_images, desc="Loading images"):
             try:
                 img = Image.open(p).convert('RGB')
-                widths.append(img.width)
-                heights.append(img.height)
                 loaded.append((img, entry))
             except Exception as e:
                 print(f"Warning: failed to open {p}: {e}")
 
         if not loaded:
             raise RuntimeError("No images could be loaded")
-
-        target_w, target_h = max(widths), max(heights)
 
         with tempfile.TemporaryDirectory(prefix="viz_") as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -94,29 +93,20 @@ class Visualizer:
             pending_movement = []
 
             for idx, (img, entry) in enumerate(tqdm(loaded, desc="Annotating")):
-                # Scale and pad the image
                 canvas, scale, x_offset, y_offset = scale_and_pad(img, target_w, target_h)
 
-                # Apply arrow annotations if requested
                 if self.annotate:
-                    aggregations = self._reconstruct_aggregations(entry)
+                    aggregations = self._reconstruct_aggregations(entry, img.size)
                     if aggregations:
-                        # Apply pending movement from previous frame
                         agg = apply_pending_movement(aggregations[0], pending_movement)
 
-                        # Use the aggregation with pending movements for visual annotation
                         canvas = annotate_image(canvas, agg, scale, x_offset, y_offset)
-
-                        # Extract pending movement for next frame
                         pending_movement = extract_pending_movement(agg)
                     else:
-                        # Reset pending movement if no aggregations
                         pending_movement = []
                 else:
-                    # Reset pending movement if annotation is disabled
                     pending_movement = []
 
-                # Add text overlays
                 annotated = self._add_text_overlays(canvas, entry, deduplicate_events, min_event_count)
 
                 frame_path = tmpdir_path / f"{idx:06d}.jpg"
@@ -126,15 +116,21 @@ class Visualizer:
 
         return output_path
 
-    def _reconstruct_aggregations(self, entry: dict) -> List[Aggregation]:
-        """Reconstruct Aggregation objects from the matched data entry."""
+    def _reconstruct_aggregations(self, entry: dict, original_size: tuple) -> List[Aggregation]:
+        """Reconstruct Aggregation objects from the matched data entry.
+
+        Args:
+            entry: The data entry containing raw events
+            original_size: The original size (width, height) of the screenshot
+        """
         try:
             # Get raw events from the entry
             raw_events = entry.get('raw_events', [])
             if not raw_events:
                 return []
 
-            # Create a single aggregation with all events
+            first_event_monitor = raw_events[0].get('monitor') if raw_events else None
+
             agg_data = {
                 'timestamp': entry.get('start_time', 0),
                 'end_timestamp': entry.get('end_time', 0),
@@ -143,7 +139,8 @@ class Visualizer:
                 'request_state': True,
                 'screenshot_path': entry.get('img'),
                 'events': raw_events,
-                'monitor': raw_events[0].get('monitor') if raw_events else None
+                'monitor': first_event_monitor,
+                'scale_factor': entry.get('scale_factor', 1.0),
             }
 
             return [Aggregation.from_dict(agg_data)]
@@ -161,14 +158,10 @@ class Visualizer:
         start_time = entry.get('start_formatted', '')
         end_time = entry.get('end_formatted', '')
 
-        # Generate event summary using to_prompt if we have aggregations
-        aggregations = self._reconstruct_aggregations(entry)
+        aggregations = self._reconstruct_aggregations(entry, (width, height))
         if aggregations:
-            # Use the Aggregation's to_prompt method
             time_str = f"[{start_time} - {end_time}]"
             prompt = aggregations[0].to_prompt(time_str, deduplicate=deduplicate, min_count=min_count)
-
-            # Extract just the actions part from the prompt
             event_summary = self._extract_actions_from_prompt(prompt)
         else:
             event_summary = ""

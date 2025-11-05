@@ -231,30 +231,40 @@ class Processor:
         captions: List[Caption],
         fps: int
     ):
-
         aggs = config.load_aggregations()
         if not aggs:
             return
-
         aggs.sort(key=lambda x: x.timestamp)
-
         matched = []
 
         for caption in captions:
             start_idx = int(caption.start_seconds * fps)
             end_idx = int(caption.end_seconds * fps)
-
             start_idx = max(0, min(start_idx, len(aggs) - 1))
             end_idx = max(start_idx, min(end_idx, len(aggs) - 1))
-
             matched_aggs = aggs[start_idx:end_idx + 1]
-
             matched.append(MatchedCaption(
                 caption=caption,
                 aggregations=matched_aggs,
                 start_index=start_idx,
-                end_index=end_idx
+                end_index=end_idx,
+                screenshot_scale_factor=matched_aggs[0].scale_factor if matched_aggs else 1.0
             ))
+
+        if matched:
+            covered_indices = set()
+            for match in matched:
+                covered_indices.update(range(match.start_index, match.end_index + 1))
+
+            remaining_indices = [i for i in range(len(aggs)) if i not in covered_indices]
+
+            if remaining_indices:
+                last_match = matched[-1]
+                remaining_aggs = [aggs[i] for i in remaining_indices if i > last_match.end_index]
+
+                if remaining_aggs:
+                    last_match.aggregations.extend(remaining_aggs)
+                    last_match.end_index = len(aggs) - 1
 
         config.save_matched_captions(matched)
 

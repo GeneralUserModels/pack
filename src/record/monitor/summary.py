@@ -143,9 +143,6 @@ def collect_outer_intervals(objects):
             if open_intervals[typ] is not None:
                 intervals[typ].append((open_intervals[typ], fts))
                 open_intervals[typ] = None
-            else:
-                print(f"Warning: 'end' state without matching 'start' at ts={ts}, type={typ}", file=sys.stderr)
-        # 'mid' states don't affect intervals, just get marked
 
     # Sort intervals and markers
     for cat in intervals:
@@ -342,12 +339,12 @@ def plot_all(events_by_cat, intervals_by_cat, state_markers_by_cat, duplicates_t
         print(f"Saved plot to: {out_path}")
 
 
-def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("aggregations.jsonl"), events_path: Path = Path("events.jsonl"), summary_path: Path = Path("summary.png")):
+def plot_summary_stats(directory: Path = Path("."), agg_path: Path = Path("raw_aggregations.jsonl"), events_path: Path = Path("events.jsonl"), summary_path: Path = Path("summary.png")):
     agg_objs = read_jsonl(agg_path)
     events_objs = read_jsonl(events_path)
 
     if not agg_objs:
-        print("Warning: no objects parsed from aggregations.jsonl", file=sys.stderr)
+        print("Warning: no objects parsed from raw_aggregations.jsonl", file=sys.stderr)
     if not events_objs:
         print("Warning: no objects parsed from events.jsonl", file=sys.stderr)
 

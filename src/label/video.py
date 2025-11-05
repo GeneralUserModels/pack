@@ -207,6 +207,13 @@ def annotate_image(
             continue
 
         img_x, img_y = screen_to_image_coords(pos, monitor, scale * agg.scale_factor, x_offset, y_offset)
+        button = getattr(click, 'button', 'left')
+        color = BUTTON_COLORS.get(button, 'yellow')
+        radius = int(8 * scale)
+        draw.ellipse(
+            [(img_x - radius, img_y - radius), (img_x + radius, img_y + radius)],
+            fill=color, outline='black', width=2
+        )
     return img
 
 
@@ -221,11 +228,6 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
              (start_x + marker_size, start_y + marker_size)],
             fill='lime', outline='darkgreen', width=2
         )
-    if not (0 <= start_x < width and 0 <= start_y < height and
-            0 <= end_x < width and 0 <= end_y < height):
-        return False
-    if abs(start_x - end_x) < 2 and abs(start_y - end_y) < 2:
-        return False
 
     line_width = max(1, int(3 * scale))
     draw.line([(start_x, start_y), (end_x, end_y)], fill='orange', width=line_width)
@@ -261,12 +263,11 @@ def create_video(
 
         pending_movement = []
 
-        for idx, src in enumerate(image_paths):
+        for idx, agg in enumerate(aggregations):
+            src = Path(agg.screenshot_path)
             dst = tmpdir_path / f"{idx:06d}.jpg"
 
-            if annotate and aggregations and idx < len(aggregations):
-                agg = aggregations[idx]
-
+            if annotate:
                 agg = apply_pending_movement(agg, pending_movement)
 
                 img_path = ImagePath(src, session_dir)
