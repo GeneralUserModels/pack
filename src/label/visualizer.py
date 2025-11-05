@@ -1,13 +1,13 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 import json
 import tempfile
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
-from label.video import annotate_image, scale_and_pad, apply_pending_movement, extract_pending_movement
-from label.models import Aggregation
+from label.video import annotate_image, scale_and_pad, apply_pending_movement, extract_pending_movement, compute_max_size
+from label.models import Aggregation, ImagePath
 
 
 class Visualizer:
@@ -48,13 +48,37 @@ class Visualizer:
         if not matched_path.exists():
             raise RuntimeError(f"data.jsonl not found in {session_dir}")
 
+        # Load the original aggregations
+        aggregations_path = session_dir / "aggregations.jsonl"
+        aggs = []
+        with open(aggregations_path, 'r') as f:
+            for line in f:
+                if line.strip():
+                    aggs.append(Aggregation.from_dict(json.loads(line)))
+        # add up all aggregations with identical screenshot_paths
+        all_aggregations = []
+        for agg in aggs:
+            if all_aggregations and all_aggregations[-1].screenshot_path == agg.screenshot_path:
+                combined_agg = all_aggregations[-1] + agg
+                all_aggregations[-1] = combined_agg
+            else:
+                all_aggregations.append(agg)
+
+        # Load matched data for captions
         matched_data = []
         with open(matched_path, 'r', encoding='utf-8') as f:
             for line in f:
                 if line.strip():
                     matched_data.append(json.loads(line))
 
-        valid_images = []
+        # Build aggregation index for quick lookup
+        agg_by_screenshot: Dict[str, Aggregation] = {}
+        for agg in all_aggregations:
+            if agg.screenshot_path:
+                agg_by_screenshot[str(Path(agg.screenshot_path).name)] = agg
+
+        # Collect frames to render based on matched data
+        frames_to_render = []
         for entry in matched_data:
             img_path = entry.get('img')
             if not img_path:
@@ -64,28 +88,42 @@ class Visualizer:
             if not p.exists():
                 p = session_dir / "screenshots" / p.name
 
+            if not p.exists():
+                continue
+
+            # Find the aggregation for this screenshot
+            agg = agg_by_screenshot.get(p.name)
+            if not agg:
+                print(f"Warning: No aggregation found for {p.name}")
+                continue
+
+            # Get all aggregations in the matched range
+            start_idx = entry.get('start_index')
+            end_idx = entry.get('end_index')
+
+            if start_idx is not None and end_idx is not None:
+                matched_aggs = all_aggregations[start_idx:end_idx + 1]
+            else:
+                matched_aggs = [agg]
+
+            frames_to_render.append((p, agg, matched_aggs, entry))
+
+        if not frames_to_render:
+            raise RuntimeError("No valid frames to render")
+
+        # Compute target size from ALL original screenshots (like master video does)
+        all_screenshot_paths = [Path(agg.screenshot_path) for agg in all_aggregations
+                                if agg.screenshot_path and Path(agg.screenshot_path).exists()]
+
+        # If paths are relative, resolve them relative to session_dir
+        resolved_paths = []
+        for p in all_screenshot_paths:
+            if not p.exists():
+                p = session_dir / "screenshots" / p.name
             if p.exists():
-                valid_images.append((p, entry))
+                resolved_paths.append(p)
 
-        if not valid_images:
-            raise RuntimeError("No valid images found")
-
-        loaded = []
-        widths, heights = [], []
-
-        for p, entry in tqdm(valid_images, desc="Loading images"):
-            try:
-                img = Image.open(p).convert('RGB')
-                widths.append(img.width)
-                heights.append(img.height)
-                loaded.append((img, entry))
-            except Exception as e:
-                print(f"Warning: failed to open {p}: {e}")
-
-        if not loaded:
-            raise RuntimeError("No images could be loaded")
-
-        target_w, target_h = max(widths), max(heights)
+        target_w, target_h = compute_max_size(resolved_paths)
 
         with tempfile.TemporaryDirectory(prefix="viz_") as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -93,31 +131,39 @@ class Visualizer:
             # Initialize pending movement tracking
             pending_movement = []
 
-            for idx, (img, entry) in enumerate(tqdm(loaded, desc="Annotating")):
-                # Scale and pad the image
+            for idx, (img_path, primary_agg, matched_aggs, caption_entry) in enumerate(tqdm(frames_to_render, desc="Annotating")):
+                # Load the original screenshot using ImagePath (handles relative paths)
+                img_path_obj = ImagePath(img_path, session_dir)
+                img = img_path_obj.load()
+
+                # Scale and pad to target size (same as master video creation)
                 canvas, scale, x_offset, y_offset = scale_and_pad(img, target_w, target_h)
 
                 # Apply arrow annotations if requested
                 if self.annotate:
-                    aggregations = self._reconstruct_aggregations(entry)
-                    if aggregations:
-                        # Apply pending movement from previous frame
-                        agg = apply_pending_movement(aggregations[0], pending_movement)
+                    # Apply pending movement from previous frame to the primary aggregation
+                    agg_with_pending = apply_pending_movement(primary_agg, pending_movement)
 
-                        # Use the aggregation with pending movements for visual annotation
-                        canvas = annotate_image(canvas, agg, scale, x_offset, y_offset)
+                    # Annotate with the primary aggregation's events (with pending movement)
+                    canvas = annotate_image(canvas, agg_with_pending, scale, x_offset, y_offset)
 
-                        # Extract pending movement for next frame
-                        pending_movement = extract_pending_movement(agg)
+                    # Extract pending movement from the LAST aggregation in the matched range
+                    # This ensures continuous cursor tracking across caption boundaries
+                    if matched_aggs:
+                        last_agg = matched_aggs[-1]
+                        # Apply pending movement to last agg to get accurate extraction
+                        if last_agg == primary_agg:
+                            pending_movement = extract_pending_movement(agg_with_pending)
+                        else:
+                            pending_movement = extract_pending_movement(last_agg)
                     else:
-                        # Reset pending movement if no aggregations
-                        pending_movement = []
+                        pending_movement = extract_pending_movement(agg_with_pending)
                 else:
-                    # Reset pending movement if annotation is disabled
                     pending_movement = []
 
                 # Add text overlays
-                annotated = self._add_text_overlays(canvas, entry, deduplicate_events, min_event_count)
+                annotated = self._add_text_overlays(canvas, caption_entry, matched_aggs,
+                                                    deduplicate_events, min_event_count)
 
                 frame_path = tmpdir_path / f"{idx:06d}.jpg"
                 annotated.save(frame_path)
@@ -126,50 +172,31 @@ class Visualizer:
 
         return output_path
 
-    def _reconstruct_aggregations(self, entry: dict) -> List[Aggregation]:
-        """Reconstruct Aggregation objects from the matched data entry."""
-        try:
-            # Get raw events from the entry
-            raw_events = entry.get('raw_events', [])
-            if not raw_events:
-                return []
-
-            # Create a single aggregation with all events
-            agg_data = {
-                'timestamp': entry.get('start_time', 0),
-                'end_timestamp': entry.get('end_time', 0),
-                'reason': 'reconstructed',
-                'event_type': 'mixed',
-                'request_state': True,
-                'screenshot_path': entry.get('img'),
-                'events': raw_events,
-                'monitor': raw_events[0].get('monitor') if raw_events else None
-            }
-
-            return [Aggregation.from_dict(agg_data)]
-        except Exception as e:
-            print(f"Warning: failed to reconstruct aggregations: {e}")
-            return []
-
-    def _add_text_overlays(self, img: Image.Image, entry: dict,
+    def _add_text_overlays(self, img: Image.Image, caption_entry: dict,
+                           matched_aggs: List[Aggregation],
                            deduplicate: bool, min_count: int) -> Image.Image:
         """Add caption and event summary text overlays to the image."""
         draw = ImageDraw.Draw(img)
         width, height = img.size
 
-        caption = entry.get('caption', '')
-        start_time = entry.get('start_formatted', '')
-        end_time = entry.get('end_formatted', '')
+        caption = caption_entry.get('caption', '')
+        start_time = caption_entry.get('start_formatted', '')
+        end_time = caption_entry.get('end_formatted', '')
 
-        # Generate event summary using to_prompt if we have aggregations
-        aggregations = self._reconstruct_aggregations(entry)
-        if aggregations:
-            # Use the Aggregation's to_prompt method
-            time_str = f"[{start_time} - {end_time}]"
-            prompt = aggregations[0].to_prompt(time_str, deduplicate=deduplicate, min_count=min_count)
+        # Generate event summary from all matched aggregations
+        time_str = f"[{start_time} - {end_time}]"
 
-            # Extract just the actions part from the prompt
-            event_summary = self._extract_actions_from_prompt(prompt)
+        # Combine events from all matched aggregations
+        if matched_aggs:
+            # Create a combined prompt from all aggregations
+            all_prompts = []
+            for agg in matched_aggs:
+                prompt = agg.to_prompt("", deduplicate=deduplicate, min_count=min_count)
+                actions = self._extract_actions_from_prompt(prompt)
+                if actions:
+                    all_prompts.append(actions)
+
+            event_summary = '\n'.join(all_prompts)
         else:
             event_summary = ""
 
@@ -193,8 +220,10 @@ class Visualizer:
             if in_actions and line.strip() and line.strip() != 'No actions recorded.':
                 # Remove leading tabs and format as bullet points
                 action = line.strip()
-                if action:
+                if action and not action.startswith('•'):
                     actions.append(f"• {action}")
+                elif action:
+                    actions.append(action)
 
         return '\n'.join(actions) if actions else ""
 
