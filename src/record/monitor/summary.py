@@ -143,9 +143,6 @@ def collect_outer_intervals(objects):
             if open_intervals[typ] is not None:
                 intervals[typ].append((open_intervals[typ], fts))
                 open_intervals[typ] = None
-            else:
-                print(f"Warning: 'end' state without matching 'start' at ts={ts}, type={typ}", file=sys.stderr)
-        # 'mid' states don't affect intervals, just get marked
 
     # Sort intervals and markers
     for cat in intervals:
