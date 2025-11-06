@@ -12,7 +12,7 @@ from label.models import Aggregation, ImagePath
 
 BUTTON_COLORS = {
     'left': 'red',
-    'right': 'blue',
+    'right': 'yellow',
     'middle': 'green'
 }
 
