@@ -204,14 +204,13 @@ class Aggregation:
                 i += 1
         return out
 
-    def to_prompt(self, time, deduplicate=True, min_count=3):
+    def to_prompt(self, time, deduplicate=True):
         """
         Generate a prompt with optional event deduplication.
 
         Args:
             time: Timestamp string for the event
             deduplicate: Whether to deduplicate consecutive events of same type
-            min_count: Minimum consecutive events needed to summarize (when deduplicating)
         """
         actions = []
         keys_pressed = []
@@ -220,16 +219,16 @@ class Aggregation:
         # Group consecutive events by type
         i = 0
         while i < len(events_for_summary):
-            event = self.events[i]
+            event = events_for_summary[i]  # Changed from self.events
             event_type = event.event_type
 
             # Count consecutive events of same type
             count = 1
-            while i + count < len(self.events) and self.events[i + count].event_type == event_type:
+            while i + count < len(events_for_summary) and events_for_summary[i + count].event_type == event_type:  # Changed from self.events
                 count += 1
 
             # Get the group of events
-            event_group = self.events[i:i + count]
+            event_group = events_for_summary[i:i + count]  # Changed from self.events
 
             if event_type == 'key_press':
                 for e in event_group:
@@ -259,7 +258,7 @@ class Aggregation:
                     actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
 
-                if count >= min_count:
+                if count >= 2:
                     scroll_data = event_group[0].details.data
                     direction = self._convert_scroll_direction(scroll_data)
                     actions.append(f"Scrolled {direction}")
@@ -274,8 +273,7 @@ class Aggregation:
                     actions.append(f"Key pressed: {keys_pressed[0]}" if len(keys_pressed) == 1 else f"Keys pressed: {'|'.join(keys_pressed)}")
                     keys_pressed.clear()
 
-                # Summarize if many consecutive moves
-                if count >= min_count:
+                if count >= 2:
                     start_pos = self._click_to_relative(event_group[0].cursor_position, event_group[0].monitor)
                     end_pos = self._click_to_relative(event_group[-1].cursor_position, event_group[-1].monitor)
                     actions.append(f"Mouse moved from {start_pos} to {end_pos}")
@@ -306,10 +304,10 @@ class Aggregation:
             click_prompt = ""
 
         prompt = f"""
-{time} Event:
-{click_prompt}
-Actions:
-{''.join(action_list) if action_list else 'No actions recorded.'}
+    {time} Event:
+    {click_prompt}
+    Actions:
+    {''.join(action_list) if action_list else 'No actions recorded.'}
         """
         return prompt
 
