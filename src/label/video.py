@@ -207,7 +207,7 @@ def annotate_image(
             continue
 
         img_x, img_y = screen_to_image_coords(pos, monitor, scale * agg.scale_factor, x_offset, y_offset)
-        button = getattr(click, 'button', 'left')
+        button = click.details.data.get('button', 'left').replace('Button.', '').lower()
         color = BUTTON_COLORS.get(button, 'yellow')
         radius = int(8 * scale)
         draw.ellipse(
@@ -226,7 +226,7 @@ def draw_arrow(draw, img_size, start_pos, end_pos, monitor, scale, x_offset, y_o
         draw.ellipse(
             [(start_x - marker_size, start_y - marker_size),
              (start_x + marker_size, start_y + marker_size)],
-            fill='lime', outline='darkgreen', width=2
+            fill='blue', outline='black', width=2
         )
 
     line_width = max(1, int(3 * scale))

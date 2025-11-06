@@ -46,9 +46,6 @@ Here are the user input events:
 
    - If the same action is done repeatedly with no change or intermediate action, **merge them into one action** with a wider start–end interval. For example, instead of multiple "Ran the command \"ls\" in the terminal," generate it ONLY once.
    - If the user repeatedly clicks / switches between applications without performing any intermediate action, merge them into a single combined action. 
-   - If events repeat, you MUST combine multiple events (e.g. clicks or switches) together into a single event and widen the start-end interval appropriately:
-      - "[Switched / clicked] [from / on] X to Y to X."
-      - “[Switched / clicked] [from / on] X to Y to Z to X.”
 
 ---
 
@@ -56,12 +53,10 @@ Here are the user input events:
 
 Generated captions must be in past tense, and at the level of detail as the examples below:
 
-- Switched repeatedly from the terminal window to the desktop.
-- Switched from the terminal window to the desktop to Google Chrome.
 - Opened the System Settings application.
 - Clicked the "Network" tab in the Settings sidebar.
 - Typed "openai office munich" into the Google search bar and pressed Enter.
-- Clicked on the Google search result titled "OpenAI Deutschland"
+- Clicked on the Google search result titled "Vegan chocolate cake recipies"
 - Ran "cd /home/user/projects/gs-utils" in the terminal.
 - Deleted the text "hyundai i30" from cell I2.
 - Clicked the "Downloads" folder in the sidebar.
