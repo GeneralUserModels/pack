@@ -262,7 +262,7 @@ class Aggregation:
                 if count >= min_count:
                     scroll_data = event_group[0].details.data
                     direction = self._convert_scroll_direction(scroll_data)
-                    actions.append(f"Scrolled {direction} ({count} times)")
+                    actions.append(f"Scrolled {direction}")
                 else:
                     for e in event_group:
                         scroll_data = e.details.data
@@ -278,7 +278,7 @@ class Aggregation:
                 if count >= min_count:
                     start_pos = self._click_to_relative(event_group[0].cursor_position, event_group[0].monitor)
                     end_pos = self._click_to_relative(event_group[-1].cursor_position, event_group[-1].monitor)
-                    actions.append(f"Mouse moved from {start_pos} to {end_pos} ({count} movements)")
+                    actions.append(f"Mouse moved from {start_pos} to {end_pos}")
                 else:
                     for e in event_group:
                         cursor_pos = e.cursor_position
