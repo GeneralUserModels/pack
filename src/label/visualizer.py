@@ -28,8 +28,7 @@ class Visualizer:
         session_dir: Path,
         output_path: Optional[Path] = None,
         fps: int = 1,
-        deduplicate_events: bool = True,
-        min_event_count: int = 3
+        deduplicate_events: bool = True
     ) -> Path:
         """
         Create an annotated video from session data.
@@ -107,7 +106,7 @@ class Visualizer:
                 else:
                     pending_movement = []
 
-                annotated = self._add_text_overlays(canvas, entry, deduplicate_events, min_event_count)
+                annotated = self._add_text_overlays(canvas, entry, deduplicate_events)
 
                 frame_path = tmpdir_path / f"{idx:06d}.jpg"
                 annotated.save(frame_path)
@@ -148,8 +147,7 @@ class Visualizer:
             print(f"Warning: failed to reconstruct aggregations: {e}")
             return []
 
-    def _add_text_overlays(self, img: Image.Image, entry: dict,
-                           deduplicate: bool, min_count: int) -> Image.Image:
+    def _add_text_overlays(self, img: Image.Image, entry: dict, deduplicate: bool) -> Image.Image:
         """Add caption and event summary text overlays to the image."""
         draw = ImageDraw.Draw(img)
         width, height = img.size
@@ -161,7 +159,7 @@ class Visualizer:
         aggregations = self._reconstruct_aggregations(entry, (width, height))
         if aggregations:
             time_str = f"[{start_time} - {end_time}]"
-            prompt = aggregations[0].to_prompt(time_str, deduplicate=deduplicate, min_count=min_count)
+            prompt = aggregations[0].to_prompt(time_str, deduplicate=deduplicate)
             event_summary = self._extract_actions_from_prompt(prompt)
         else:
             event_summary = ""
