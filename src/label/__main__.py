@@ -2,7 +2,7 @@ from pathlib import Path
 import argparse
 from dotenv import load_dotenv
 
-from label.discovery import discover_sessions, discover_video_sessions, create_single_config
+from label.discovery import discover_sessions, discover_screenshots_sessions, create_single_config
 from label.clients import create_client
 from label.processor import Processor
 from label.visualizer import Visualizer
@@ -20,9 +20,10 @@ def parse_args():
     p.add_argument("--chunk-duration", type=int, default=60, help="Chunk duration in seconds")
     p.add_argument("--fps", type=int, default=1, help="Frames per second for video processing")
 
-    p.add_argument("--video-only", action="store_true", help="Process video only without screenshots or annotations")
-    p.add_argument("--video-extensions", nargs="+", default=[".mp4", ".avi", ".mov", ".mkv"], help="Video file extensions to consider")
-    p.add_argument("--prompt-file", default=None, help="Path to prompt file (default: prompts/default.txt or prompts/video_only.txt if video only)")
+    p.add_argument("--screenshots-only", action="store_true", help="Process screenshots folder only without aggregations or annotations")
+    p.add_argument("--image-extensions", nargs="+", default=[".jpg", ".jpeg", ".png"], help="Image file extensions to consider")
+    p.add_argument("--max-time-gap", type=float, default=300.0, help="Maximum time gap (seconds) between images before forcing a video split (default: 120 = 2 minutes)")
+    p.add_argument("--prompt-file", default=None, help="Path to prompt file (default: prompts/default.txt or prompts/screenshots_only.txt if screenshots only)")
     p.add_argument("--annotate", action="store_true", help="Annotate videos with cursor positions and clicks (only for standard processing)")
     p.add_argument("--skip-existing", action="store_true", help="Skip sessions that have already been processed")
     p.add_argument("--visualize", action="store_true", help="Create annotated video visualizations after processing")
@@ -39,7 +40,7 @@ def parse_args():
     if not args.model:
         args.model = 'gemini-2.5-flash' if args.client == 'gemini' else 'Qwen/Qwen3-VL-8B-Thinking-FP8'
     if not args.prompt_file:
-        args.prompt_file = "prompts/video_only.txt" if args.video_only else "prompts/default.txt"
+        args.prompt_file = "prompts/screenshots_only.txt" if args.screenshots_only else "prompts/default.txt"
 
     return args
 
@@ -49,15 +50,15 @@ def setup_configs(args):
         configs = [create_single_config(
             args.session,
             args.chunk_duration,
-            args.video_only,
-            tuple(args.video_extensions),
+            args.screenshots_only,
+            tuple(args.image_extensions),
         )]
     else:
-        if args.video_only:
-            configs = discover_video_sessions(
+        if args.screenshots_only:
+            configs = discover_screenshots_sessions(
                 args.sessions_root,
                 args.chunk_duration,
-                tuple(args.video_extensions),
+                tuple(args.image_extensions),
             )
         else:
             configs = discover_sessions(
@@ -82,14 +83,15 @@ def process_with_gemini(args, configs):
     processor = Processor(
         client=client,
         num_workers=args.num_workers,
-        video_only=args.video_only,
+        screenshots_only=args.screenshots_only,
         prompt_file=args.prompt_file,
+        max_time_gap=args.max_time_gap,
     )
 
     return processor.process_sessions(
         configs,
         fps=args.fps,
-        annotate=args.annotate and not args.video_only,
+        annotate=args.annotate and not args.screenshots_only,
     )
 
 
@@ -103,14 +105,15 @@ def process_with_vllm(args, configs):
     processor = Processor(
         client=client,
         num_workers=args.num_workers,
-        video_only=args.video_only,
+        screenshots_only=args.screenshots_only,
         prompt_file=args.prompt_file,
+        max_time_gap=args.max_time_gap,
     )
 
     return processor.process_sessions(
         configs,
         fps=args.fps,
-        annotate=args.annotate and not args.video_only,
+        annotate=args.annotate and not args.screenshots_only,
     )
 
 

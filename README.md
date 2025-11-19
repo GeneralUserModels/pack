@@ -82,7 +82,7 @@ logs/session_name
 
 ## `uv run -m label` — Label a session
 
-**What it does:** Loads recorded sessions or raw video, chunks and formats them, runs VLM labeling, and optionally renders annotated videos.
+**What it does:** Loads recorded sessions or raw screenshots, chunks and formats them, runs VLM labeling, and optionally renders annotated videos.
 
 ### Session selection (required)
 
@@ -97,13 +97,16 @@ logs/session_name
 | `--fps`            | int  | `1`     | Frame sampling rate             |
 | `--skip-existing`  | flag | off     | Skip already processed sessions |
 
-### Video-only mode
+### Screenshots-only mode
 
-| Flag                               | Description                                                                                           |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `--video-only`                     | Process video files without screenshots or annotations                                                |
-| `--video-extensions .mp4 .avi ...` | Recognized video extensions                                                                           |
-| `--prompt-file`                    | Custom prompt file (defaults to `prompts/video_only.txt` in video-only mode or `prompts/default.txt`) |
+| Flag                               | Description                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--screenshots-only`               | Process raw screenshots without aggregations or input event annotations                                       |
+| `--video-extensions .mp4 .avi ...` | Recognized video extensions                                                                                   |
+| `--prompt-file`                    | Custom prompt file (defaults to `prompts/screenshots_only.txt` in screenshots-only mode or `prompts/default.txt`) |
+
+> [!NOTE]
+> Screenshots-only mode requires your session folder to contain a `screenshots/` subdirectory with image files (.jpg, .jpeg, or .png).
 
 ### Visualization & annotations
 
@@ -162,12 +165,12 @@ uv run -m label \
   --annotate
 ```
 
-Video-only labeling (with vLLM):
+Screenshots-only labeling (with vLLM):
 
 ```bash
 uv run -m label \
-  --session path_with_video \
-  --video-only \
+  --session path_with_screenshots \
+  --screenshots-only \
   --client vllm \
   --model Qwen/Qwen3-VL-8B-Thinking-FP8 \
   --vllm-url http://localhost:8000/v1
@@ -213,8 +216,8 @@ Aggregation flow (high level):
 
 The `label` module:
 
-* Loads sessions or raw video, chunks them and their logs, and prepares inputs for the VLM.
-* Uses prompts (in `label/prompts`) to instruct the VLM to generate captions that describe the user’s actions and context.
+* Loads sessions or raw screenshots, chunks them and their logs, and prepares inputs for the VLM.
+* Uses prompts (in `label/prompts`) to instruct the VLM to generate captions that describe the user's actions and context.
 * Produces `captions.jsonl` and `data.jsonl` (captions aligned to screenshots and events).
 * Optionally renders an annotated video (`annotated.mp4`) showing captions and event visualizations overlayed on frames.
 

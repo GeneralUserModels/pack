@@ -43,10 +43,10 @@ def discover_sessions(
     return configs
 
 
-def discover_video_sessions(
+def discover_screenshots_sessions(
     sessions_root: Path,
     chunk_duration: int = 60,
-    video_exts: Tuple[str, ...] = (".mp4", ".avi", ".mov", ".mkv")
+    image_exts: Tuple[str, ...] = (".jpg", ".jpeg", ".png")
 ) -> List[SessionConfig]:
 
     if not sessions_root.exists():
@@ -58,23 +58,22 @@ def discover_video_sessions(
         if not session_dir.is_dir():
             continue
 
-        video_files = [
-            f for f in session_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in video_exts
+        # Look for screenshots directory
+        screenshots_dir = session_dir / "screenshots"
+        if not screenshots_dir.exists():
+            continue
+
+        # Check if there are any image files
+        image_files = [
+            f for f in screenshots_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in image_exts
         ]
 
-        video_subdir = session_dir / "video"
-        if video_subdir.exists():
-            video_files.extend([
-                f for f in video_subdir.iterdir()
-                if f.is_file() and f.suffix.lower() in video_exts
-            ])
-
-        if video_files:
+        if image_files:
             configs.append(SessionConfig(
                 session_folder=session_dir,
                 chunk_duration=chunk_duration,
-                video_path=VideoPath(video_files[0])
+                _screenshots_dir=screenshots_dir
             ))
 
     return configs
@@ -83,31 +82,31 @@ def discover_video_sessions(
 def create_single_config(
     session_dir: Path,
     chunk_duration: int,
-    video_only: bool,
-    video_exts: Tuple[str, ...],
+    screenshots_only: bool,
+    image_exts: Tuple[str, ...],
     prompt: str = ""
 ) -> SessionConfig:
 
-    if video_only:
-        video_files = [
-            f for f in session_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in video_exts
+    if screenshots_only:
+        # Check if there's a screenshots subdirectory first
+        screenshots_dir = session_dir / "screenshots"
+        if screenshots_dir.exists() and screenshots_dir.is_dir():
+            search_dir = screenshots_dir
+        else:
+            search_dir = session_dir
+        
+        image_files = [
+            f for f in search_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in image_exts
         ]
 
-        video_subdir = session_dir / "video"
-        if video_subdir.exists():
-            video_files.extend([
-                f for f in video_subdir.iterdir()
-                if f.is_file() and f.suffix.lower() in video_exts
-            ])
-
-        if not video_files:
-            raise RuntimeError(f"No video files found in {session_dir}")
+        if not image_files:
+            raise RuntimeError(f"No image files found in {search_dir}")
 
         return SessionConfig(
             session_folder=session_dir,
             chunk_duration=chunk_duration,
-            video_path=VideoPath(video_files[0])
+            _screenshots_dir=search_dir
         )
     else:
         return SessionConfig(

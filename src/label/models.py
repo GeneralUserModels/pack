@@ -449,6 +449,7 @@ class SessionConfig:
     chunk_duration: int = 60
     video_path: Optional[VideoPath] = None
     agg_path: Optional[Path] = None
+    _screenshots_dir: Optional[Path] = None
 
     @property
     def session_id(self) -> str:
@@ -468,6 +469,8 @@ class SessionConfig:
 
     @property
     def screenshots_dir(self) -> Path:
+        if self._screenshots_dir is not None:
+            return self._screenshots_dir
         return self.session_folder / "screenshots"
 
     @property

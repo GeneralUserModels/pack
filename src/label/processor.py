@@ -1,7 +1,8 @@
 import re
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -15,13 +16,15 @@ class Processor:
         self,
         client: VLMClient,
         num_workers: int = 4,
-        video_only: bool = False,
+        screenshots_only: bool = False,
         prompt_file: str = "prompts/default.txt",
+        max_time_gap: float = 300.0,
     ):
         self.client = client
         self.num_workers = num_workers
-        self.video_only = video_only
+        self.screenshots_only = screenshots_only
         self.prompt = self._load_prompt(prompt_file)
+        self.max_time_gap = max_time_gap
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
@@ -41,8 +44,8 @@ class Processor:
         for config in tqdm(configs, desc="Preparing"):
             config.ensure_dirs()
 
-            if self.video_only:
-                tasks.extend(self._prepare_video_only(config))
+            if self.screenshots_only:
+                tasks.extend(self._prepare_screenshots_only(config, fps))
             else:
                 tasks.extend(self._prepare_standard(config, fps, annotate))
 
@@ -100,25 +103,170 @@ class Processor:
 
         return tasks
 
-    def _prepare_video_only(self, config: SessionConfig) -> List[ChunkTask]:
-        if not config.video_path or not config.video_path.exists():
+    def _prepare_screenshots_only(self, config: SessionConfig, fps: int) -> List[ChunkTask]:
+        if not config.screenshots_dir or not config.screenshots_dir.exists():
             return []
 
-        chunks = split_video(config.video_path.resolve(), config.chunk_duration, config.chunks_dir)
+        # Get all image files from the screenshots directory
+        image_files = sorted([
+            f for f in config.screenshots_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ])
 
+        if not image_files:
+            return []
+
+        # Group images by time gaps (split if > max_time_gap seconds apart)
+        image_segments = self._split_images_by_time_gap(image_files, max_gap_seconds=self.max_time_gap)
+        
+        print(f"\n[Segments] Created {len(image_segments)} segment(s) from {len(image_files)} images (max gap: {self.max_time_gap}s)")
+        for idx, seg in enumerate(image_segments):
+            print(f"  Segment {idx}: {len(seg)} images")
+        
         tasks = []
-        for i, video_path in enumerate(chunks):
-            tasks.append(ChunkTask(
-                session_id=config.session_id,
-                chunk_index=i,
-                video_path=VideoPath(video_path),
-                prompt=self.prompt,
-                aggregations=[],
-                chunk_start_time=i * config.chunk_duration,
-                chunk_duration=config.chunk_duration
-            ))
+        chunk_index = 0
+        cumulative_time = 0  # Track actual time across all segments
+
+        for segment_idx, segment_images in enumerate(image_segments):
+            if not segment_images:
+                continue
+
+            # Create a video for this segment
+            segment_video_path = config.chunks_dir / f"segment_{segment_idx:03d}.mp4"
+            
+            if not segment_video_path.exists():
+                create_video(
+                    segment_images,
+                    segment_video_path,
+                    fps=fps,
+                    pad_to=None,
+                    annotate=False,
+                    aggregations=None,
+                    session_dir=None
+                )
+
+            # Get the actual duration of this segment video
+            from label.video import get_video_duration
+            segment_duration = get_video_duration(segment_video_path)
+            if segment_duration is None:
+                print(f"Warning: Could not get duration for {segment_video_path}, skipping segment")
+                continue
+
+            # Split this segment video into chunks based on chunk_duration
+            segment_chunks = split_video(segment_video_path, config.chunk_duration, config.chunks_dir, start_index=chunk_index)
+
+            # Create tasks for each chunk with correct timing
+            for i, video_path in enumerate(segment_chunks):
+                chunk_start_in_segment = i * config.chunk_duration
+                actual_chunk_duration = min(config.chunk_duration, segment_duration - chunk_start_in_segment)
+                
+                tasks.append(ChunkTask(
+                    session_id=config.session_id,
+                    chunk_index=chunk_index,
+                    video_path=VideoPath(video_path),
+                    prompt=self.prompt,
+                    aggregations=[],
+                    chunk_start_time=cumulative_time + chunk_start_in_segment,
+                    chunk_duration=int(actual_chunk_duration)
+                ))
+                chunk_index += 1
+
+            # Update cumulative time for next segment
+            cumulative_time += segment_duration
 
         return tasks
+    
+    def _split_images_by_time_gap(self, image_files: List[Path], max_gap_seconds: float = 30) -> List[List[Path]]:
+        """
+        Split images into segments based on time gaps between consecutive images.
+        If two images are more than max_gap_seconds apart, start a new segment.
+        
+        Args:
+            image_files: List of image file paths (should be sorted)
+            max_gap_seconds: Maximum time gap in seconds before forcing a split
+            
+        Returns:
+            List of image segments, where each segment is a list of consecutive images
+        """
+        if not image_files:
+            return []
+        
+        segments = []
+        current_segment = [image_files[0]]
+        prev_timestamp = self._extract_timestamp_from_filename(image_files[0])
+        
+        for img_path in image_files[1:]:
+            curr_timestamp = self._extract_timestamp_from_filename(img_path)
+            
+            # If we can't parse timestamps, just keep adding to current segment
+            if prev_timestamp is None or curr_timestamp is None:
+                current_segment.append(img_path)
+                continue
+            
+            # Check time gap
+            time_gap = abs(curr_timestamp - prev_timestamp)
+            
+            if time_gap > max_gap_seconds:
+                # Start a new segment
+                print(f"[Split] Time gap detected: {time_gap:.1f}s between screenshots (threshold: {max_gap_seconds}s)")
+                print(f"  Previous: {image_files[image_files.index(img_path)-1].name}")
+                print(f"  Current:  {img_path.name}")
+                segments.append(current_segment)
+                current_segment = [img_path]
+            else:
+                current_segment.append(img_path)
+            
+            prev_timestamp = curr_timestamp
+        
+        # Add the last segment
+        if current_segment:
+            segments.append(current_segment)
+        
+        return segments
+    
+    def _extract_timestamp_from_filename(self, path: Path) -> Optional[float]:
+        """
+        Extract timestamp from filename. Supports multiple formats:
+        1. Float timestamp: 1760702571.228687_reason_move_start.jpg
+        2. DateTime format: w5_6713_sstetler1@msn.com20200810004157314.jpg (YYYYMMDDHHMMSSmmm)
+        
+        Returns timestamp as float (seconds since epoch) or None if unable to parse
+        """
+        filename = path.name
+        
+        # Try format 1: float timestamp at the beginning
+        m = re.search(r'^(\d+\.\d+)', filename)
+        if m:
+            try:
+                return float(m.group(1))
+            except Exception:
+                pass
+        
+        # Try format 2: YYYYMMDDHHMMSSmmm datetime format
+        # Look for 17 consecutive digits (YYYYMMDDHHMMSSMMM)
+        m = re.search(r'(\d{17})', filename)
+        if m:
+            try:
+                timestamp_str = m.group(1)
+                # Parse: YYYYMMDDHHMMSSMMM
+                year = int(timestamp_str[0:4])
+                month = int(timestamp_str[4:6])
+                day = int(timestamp_str[6:8])
+                hour = int(timestamp_str[8:10])
+                minute = int(timestamp_str[10:12])
+                second = int(timestamp_str[12:14])
+                millisecond = int(timestamp_str[14:17])
+                
+                dt = datetime(year, month, day, hour, minute, second, millisecond * 1000)
+                return dt.timestamp()
+            except Exception:
+                pass
+        
+        # Fallback: try file modification time
+        try:
+            return path.stat().st_mtime
+        except Exception:
+            return None
 
     def _process_tasks(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
         """Process tasks with configurable concurrency using num_workers."""
@@ -165,7 +313,7 @@ class Processor:
 
             config = next(c for c in configs if c.session_id == task.session_id)
 
-            if not self.video_only and task.aggregations:
+            if not self.screenshots_only and task.aggregations:
                 agg_file = config.aggregations_dir / f"{task.chunk_index:03d}.json"
                 with open(agg_file, 'w') as f:
                     json.dump([a.to_dict() for a in task.aggregations], f, indent=2)
@@ -186,7 +334,7 @@ class Processor:
                 captions.sort(key=lambda c: c.start_seconds)
                 config.save_captions(captions)
 
-                if not self.video_only:
+                if not self.screenshots_only:
                     self._create_matched_captions(config, captions, fps)
 
         return {sid: len(caps) for sid, caps in session_captions.items()}
