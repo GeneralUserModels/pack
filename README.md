@@ -105,6 +105,9 @@ logs/session_name
 | `--video-extensions .mp4 .avi ...` | Recognized video extensions                                                                                   |
 | `--prompt-file`                    | Custom prompt file (defaults to `prompts/screenshots_only.txt` in screenshots-only mode or `prompts/default.txt`) |
 
+> [!NOTE]
+> Screenshots-only mode requires your session folder to contain a `screenshots/` subdirectory with image files (.jpg, .jpeg, or .png).
+
 ### Visualization & annotations
 
 | Flag          | Description                                                     |
