@@ -28,7 +28,7 @@ def get_video_duration(video_path: Path) -> Optional[float]:
         return None
 
 
-def split_video(video_path: Path, chunk_duration: int, out_dir: Path) -> List[Path]:
+def split_video(video_path: Path, chunk_duration: int, out_dir: Path, start_index: int = 0) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     duration = get_video_duration(video_path)
     if duration is None:
@@ -36,10 +36,12 @@ def split_video(video_path: Path, chunk_duration: int, out_dir: Path) -> List[Pa
 
     num_chunks = math.ceil(duration / float(chunk_duration))
     chunk_paths = []
+    
+    print(f"[Split] 1-minute chunking: Splitting {video_path.name} into {num_chunks} chunks of {chunk_duration}s each (total duration: {duration:.1f}s)")
 
     for i in range(num_chunks):
         start = i * chunk_duration
-        out_path = out_dir / f"{i:03d}.mp4"
+        out_path = out_dir / f"{start_index + i:03d}.mp4"
 
         cmd = [
             'ffmpeg', '-y', '-ss', str(start), '-i', str(video_path),
@@ -263,29 +265,38 @@ def create_video(
 
         pending_movement = []
 
-        for idx, agg in enumerate(aggregations):
-            src = Path(agg.screenshot_path)
-            dst = tmpdir_path / f"{idx:06d}.jpg"
+        # Handle both aggregations mode and direct image paths mode
+        if aggregations is not None:
+            # Use aggregations to get image paths
+            for idx, agg in enumerate(aggregations):
+                src = Path(agg.screenshot_path)
+                dst = tmpdir_path / f"{idx:06d}.jpg"
 
-            if annotate:
-                agg = apply_pending_movement(agg, pending_movement)
+                if annotate:
+                    agg = apply_pending_movement(agg, pending_movement)
 
-                img_path = ImagePath(src, session_dir)
-                img = img_path.load()
+                    img_path = ImagePath(src, session_dir)
+                    img = img_path.load()
 
-                if pad_to:
-                    img, scale, x_off, y_off = scale_and_pad(img, pad_to[0], pad_to[1])
+                    if pad_to:
+                        img, scale, x_off, y_off = scale_and_pad(img, pad_to[0], pad_to[1])
+                    else:
+                        scale, x_off, y_off = 1.0, 0, 0
+
+                    img = annotate_image(img, agg, scale, x_off, y_off)
+
+                    pending_movement = extract_pending_movement(agg)
+
+                    img.save(dst)
                 else:
-                    scale, x_off, y_off = 1.0, 0, 0
-
-                img = annotate_image(img, agg, scale, x_off, y_off)
-
-                pending_movement = extract_pending_movement(agg)
-
-                img.save(dst)
-            else:
+                    shutil.copy2(src, dst)
+                    pending_movement = []
+        else:
+            # Use image_paths directly (screenshots-only mode)
+            for idx, img_path in enumerate(image_paths):
+                src = Path(img_path)
+                dst = tmpdir_path / f"{idx:06d}.jpg"
                 shutil.copy2(src, dst)
-                pending_movement = []
 
         vf_parts = []
         if pad_to:

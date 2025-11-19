@@ -11,6 +11,7 @@ prompting_benchmark/data/*
 !prompting_benchmark/data/screenshots/
 
 datasets
+sample_images
 
 # C extensions
 *.so
