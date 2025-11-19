@@ -125,6 +125,7 @@ class Processor:
         
         tasks = []
         chunk_index = 0
+        cumulative_time = 0  # Track actual time across all segments
 
         for segment_idx, segment_images in enumerate(image_segments):
             if not segment_images:
@@ -144,21 +145,34 @@ class Processor:
                     session_dir=None
                 )
 
+            # Get the actual duration of this segment video
+            from label.video import get_video_duration
+            segment_duration = get_video_duration(segment_video_path)
+            if segment_duration is None:
+                print(f"Warning: Could not get duration for {segment_video_path}, skipping segment")
+                continue
+
             # Split this segment video into chunks based on chunk_duration
             segment_chunks = split_video(segment_video_path, config.chunk_duration, config.chunks_dir, start_index=chunk_index)
 
-            # Create tasks for each chunk
+            # Create tasks for each chunk with correct timing
             for i, video_path in enumerate(segment_chunks):
+                chunk_start_in_segment = i * config.chunk_duration
+                actual_chunk_duration = min(config.chunk_duration, segment_duration - chunk_start_in_segment)
+                
                 tasks.append(ChunkTask(
                     session_id=config.session_id,
                     chunk_index=chunk_index,
                     video_path=VideoPath(video_path),
                     prompt=self.prompt,
                     aggregations=[],
-                    chunk_start_time=chunk_index * config.chunk_duration,
-                    chunk_duration=config.chunk_duration
+                    chunk_start_time=cumulative_time + chunk_start_in_segment,
+                    chunk_duration=int(actual_chunk_duration)
                 ))
                 chunk_index += 1
+
+            # Update cumulative time for next segment
+            cumulative_time += segment_duration
 
         return tasks
     
