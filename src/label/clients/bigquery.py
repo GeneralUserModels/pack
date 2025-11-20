@@ -93,7 +93,7 @@ class BigQueryClient(VLMClient):
         Args:
             prompt: Text prompt for the model
             file_descriptor: GCS URI returned from upload_file()
-            schema: JSON schema for response (currently ignored, uses FLATTEN_JSON_OUTPUT)
+            schema: JSON schema for structured response
             
         Returns:
             BigQueryResponse object with the model's response
@@ -103,23 +103,35 @@ class BigQueryClient(VLMClient):
         
         gcs_uri = file_descriptor
         
+        # Use provided schema or fall back to CAPTION_SCHEMA
+        response_schema = schema or CAPTION_SCHEMA
+        
+        # Build model_params JSON with schema and temperature
+        model_params = {
+            "generation_config": {
+                "temperature": self.temperature,
+                "response_schema": response_schema
+            }
+        }
+        model_params_json = json.dumps(model_params)
+        
         # Construct the BigQuery SQL query
         # Using OBJ.FETCH_METADATA to reference the video file in GCS
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
-          MODEL `{self.project_id}.{self.dataset_id}.{self.model_name}`,
-          (
+        MODEL `{self.project_id}.{self.dataset_id}.{self.model_name}`,
+        (
             SELECT 
-              STRUCT(
+            STRUCT(
                 @prompt, 
                 OBJ.FETCH_METADATA(OBJ.MAKE_REF(@gcs_uri, @object_table_location))
-              ) AS prompt 
-          ),
-          STRUCT(
-            @temperature AS temperature,
+            ) AS prompt 
+        ),
+        STRUCT(
+            @model_params AS model_params,
             TRUE AS FLATTEN_JSON_OUTPUT
-          )
+        )
         )
         """
         
@@ -129,7 +141,7 @@ class BigQueryClient(VLMClient):
                 bigquery.ScalarQueryParameter("prompt", "STRING", prompt),
                 bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
                 bigquery.ScalarQueryParameter("object_table_location", "STRING", self.object_table_location),
-                bigquery.ScalarQueryParameter("temperature", "FLOAT64", self.temperature),
+                bigquery.ScalarQueryParameter("model_params", "STRING", model_params_json),
             ]
         )
         
