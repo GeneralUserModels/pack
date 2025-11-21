@@ -111,9 +111,13 @@ class BigQueryClient(VLMClient):
         }
         model_params_json = json.dumps(model_params)
         
-        # Construct the BigQuery SQL query
+        # Escape single quotes for SQL string literals (BigQuery uses '' to escape ')
+        # BigQuery requires literal values (not parameters) in ML.GENERATE_TEXT
+        escaped_prompt = prompt.replace("'", "''")
+        escaped_json = model_params_json.replace("'", "''")
+        
+        # Construct the BigQuery SQL query with all literal values
         # Using OBJ.FETCH_METADATA to reference the video file in GCS
-        # Note: model_params must be a literal value, not a query parameter
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
@@ -121,25 +125,19 @@ class BigQueryClient(VLMClient):
         (
             SELECT 
             STRUCT(
-                @prompt, 
-                OBJ.FETCH_METADATA(OBJ.MAKE_REF(@gcs_uri, @object_table_location))
+                '{escaped_prompt}', 
+                OBJ.FETCH_METADATA(OBJ.MAKE_REF('{gcs_uri}', '{self.object_table_location}'))
             ) AS prompt 
         ),
         STRUCT(
-            JSON '{model_params_json}' AS model_params,
+            JSON '{escaped_json}' AS model_params,
             TRUE AS FLATTEN_JSON_OUTPUT
         )
         )
         """
         
-        # Configure query with parameters
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("prompt", "STRING", prompt),
-                bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
-                bigquery.ScalarQueryParameter("object_table_location", "STRING", self.object_table_location),
-            ]
-        )
+        # No query parameters needed - all values are literals
+        job_config = bigquery.QueryJobConfig()
         
         # Execute the query
         query_job = self.bq_client.query(query, job_config=job_config)
