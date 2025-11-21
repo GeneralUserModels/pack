@@ -113,6 +113,7 @@ class BigQueryClient(VLMClient):
         
         # Construct the BigQuery SQL query
         # Using OBJ.FETCH_METADATA to reference the video file in GCS
+        # Note: model_params must be a literal value, not a query parameter
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
@@ -125,7 +126,7 @@ class BigQueryClient(VLMClient):
             ) AS prompt 
         ),
         STRUCT(
-            @model_params AS model_params,
+            JSON '{model_params_json}' AS model_params,
             TRUE AS FLATTEN_JSON_OUTPUT
         )
         )
@@ -137,7 +138,6 @@ class BigQueryClient(VLMClient):
                 bigquery.ScalarQueryParameter("prompt", "STRING", prompt),
                 bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
                 bigquery.ScalarQueryParameter("object_table_location", "STRING", self.object_table_location),
-                bigquery.ScalarQueryParameter("model_params", "STRING", model_params_json),
             ]
         )
         
