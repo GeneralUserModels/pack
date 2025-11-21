@@ -1,8 +1,10 @@
-from typing import Optional, Any, Dict, List, Union
+from typing import Optional, Any, Dict
 import json
 from pathlib import Path
+
 from google.cloud import storage
 from google.cloud import bigquery
+
 from label.clients.client import VLMClient, CAPTION_SCHEMA
 
 
@@ -35,7 +37,7 @@ class BigQueryClient(VLMClient):
     ):
         """
         Initialize BigQuery client for ML.GENERATE_TEXT with video analysis.
-        
+
         Args:
             model_name: Full BigQuery model reference (e.g., "dataset.model" or "project.dataset.model")
             bucket_name: GCS bucket name for uploading videos
@@ -49,131 +51,115 @@ class BigQueryClient(VLMClient):
         self.gcs_prefix = gcs_prefix
         self.object_table_location = object_table_location
         self.temperature = temperature
-        
+
         self.storage_client = storage.Client(project=project_id)
         self.bq_client = bigquery.Client(project=project_id)
-    
-    @staticmethod
-    def _escape_for_bq_triple_quoted_string(s: str) -> str:
-        """
-        Escape a string for use in BigQuery triple-quoted string literals.
-        
-        In BigQuery triple-quoted strings, you need to escape:
-        - Backslashes: single backslash becomes double backslash
-        - Triple quotes: must be escaped with backslash
-        
-        Args:
-            s: The string to escape
-            
-        Returns:
-            Escaped string safe for BigQuery triple-quoted string literals
-        """
-        # Escape backslashes first (order matters!)
-        s = s.replace('\\', '\\\\')
-        # Escape triple quotes
-        s = s.replace('"""', '\\"""')
-        return s
 
     def upload_file(self, path: str) -> str:
         """
         Upload file to GCS and return the GCS URI.
-        
+
         Args:
             path: Local file path
-            
+
         Returns:
             GCS URI (gs://bucket/path/to/file)
         """
         file_path = Path(path)
         destination_blob_name = f"{self.gcs_prefix}/{file_path.name}"
-        
+
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(destination_blob_name)
-        
+
         # Upload the file
         blob.upload_from_filename(path)
-        
+
         gcs_uri = f"gs://{self.bucket_name}/{destination_blob_name}"
         print(f"Uploaded {path} to {gcs_uri}")
-        
+
         return gcs_uri
 
     def generate(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         file_descriptor: Optional[Any] = None,
-        schema: Optional[Dict] = None
+        schema: Optional[Dict] = None,
     ) -> BigQueryResponse:
         """
         Generate text using BigQuery ML.GENERATE_TEXT with video from GCS.
-        
+
         Args:
             prompt: Text prompt for the model
             file_descriptor: GCS URI returned from upload_file()
             schema: JSON schema for structured response
-            
+
         Returns:
             BigQueryResponse object with the model's response
         """
         if not file_descriptor:
             raise ValueError("file_descriptor (GCS URI) is required")
-        
+
         gcs_uri = file_descriptor
-        
+
         # Use provided schema or fall back to CAPTION_SCHEMA
         response_schema = schema or CAPTION_SCHEMA
-        
-        # Escape strings for BigQuery triple-quoted string literals
-        # BigQuery requires literal values (not parameters) in ML.GENERATE_TEXT
-        escaped_prompt = self._escape_for_bq_triple_quoted_string(prompt)
-        
-        # Convert response_schema to JSON string and escape for SQL
         response_schema_json = json.dumps(response_schema)
-        escaped_schema = self._escape_for_bq_triple_quoted_string(response_schema_json)
-        
-        # Construct the BigQuery SQL query with all literal values
-        # Using OBJ.FETCH_METADATA to reference the video file in GCS
-        # Build the generation_config struct with literal values
-        # Use triple-quoted strings for multi-line prompt
+
+        # Construct the BigQuery SQL query using query parameters
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
-        MODEL `{self.model_name}`,
-        (
-            SELECT 
+          MODEL `{self.model_name}`,
+          (
+            SELECT STRUCT(
+              @prompt,
+              OBJ.FETCH_METADATA(
+                OBJ.MAKE_REF(@gcs_uri, @object_table_location)
+              )
+            ) AS prompt
+          ),
+          STRUCT(
             STRUCT(
-                \"\"\"{escaped_prompt}\"\"\", 
-                OBJ.FETCH_METADATA(OBJ.MAKE_REF('{gcs_uri}', '{self.object_table_location}'))
-            ) AS prompt 
-        ),
-        STRUCT(
-            STRUCT(
-                {self.temperature} AS temperature,
-                JSON \"\"\"{escaped_schema}\"\"\" AS response_schema
+              @temperature AS temperature,
+              JSON @response_schema AS response_schema
             ) AS generation_config,
             TRUE AS FLATTEN_JSON_OUTPUT
-        )
+          )
         )
         """
-        
-        # No query parameters needed - all values are literals
-        job_config = bigquery.QueryJobConfig()
-        
-        # Print query for debugging
+
+        # Configure query parameters instead of embedding literals directly
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("prompt", "STRING", prompt),
+                bigquery.ScalarQueryParameter("gcs_uri", "STRING", gcs_uri),
+                bigquery.ScalarQueryParameter(
+                    "object_table_location", "STRING", self.object_table_location
+                ),
+                bigquery.ScalarQueryParameter(
+                    "temperature", "FLOAT64", float(self.temperature)
+                ),
+                bigquery.ScalarQueryParameter(
+                    "response_schema", "STRING", response_schema_json
+                ),
+            ]
+        )
+
+        # Print query for debugging (note: parameters won't be inlined)
         print("=" * 80)
         print("BigQuery ML.GENERATE_TEXT Query:")
         print("=" * 80)
         print(query)
         print("=" * 80)
-        
+
         # Execute the query
         query_job = self.bq_client.query(query, job_config=job_config)
-        
+
         # Wait for the query to complete and get results
         results = query_job.result()
-        
+
         # Get the first (and only) row
         for row in results:
             return BigQueryResponse(row)
-        
+
         raise RuntimeError("No results returned from BigQuery")
