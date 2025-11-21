@@ -121,7 +121,7 @@ class BigQueryClient(VLMClient):
           STRUCT(
             STRUCT(
               @temperature AS temperature,
-              JSON @response_schema AS response_schema
+              CAST(@response_schema AS JSON) AS response_schema
             ) AS generation_config,
             TRUE AS FLATTEN_JSON_OUTPUT
           )
