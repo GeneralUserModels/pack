@@ -26,28 +26,24 @@ class BigQueryResponse:
 class BigQueryClient(VLMClient):
     def __init__(
         self,
-        project_id: str,
-        dataset_id: str,
         model_name: str,
         bucket_name: str,
         gcs_prefix: str = "video_chunks",
         object_table_location: str = "us",  # e.g., "us.screenomics-gemini"
         temperature: float = 0.0,
+        project_id: Optional[str] = None,
     ):
         """
         Initialize BigQuery client for ML.GENERATE_TEXT with video analysis.
         
         Args:
-            project_id: GCP project ID
-            dataset_id: BigQuery dataset containing the remote model
-            model_name: Name of the Gemini remote model in BigQuery
+            model_name: Full BigQuery model reference (e.g., "dataset.model" or "project.dataset.model")
             bucket_name: GCS bucket name for uploading videos
             gcs_prefix: Prefix/folder path in GCS bucket
             object_table_location: Object table location (e.g., "us.screenomics-gemini")
             temperature: Model temperature parameter
+            project_id: Optional GCP project ID (if not provided, uses default credentials)
         """
-        self.project_id = project_id
-        self.dataset_id = dataset_id
         self.model_name = model_name
         self.bucket_name = bucket_name
         self.gcs_prefix = gcs_prefix
@@ -120,7 +116,7 @@ class BigQueryClient(VLMClient):
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
-        MODEL `{self.project_id}.{self.dataset_id}.{self.model_name}`,
+        MODEL `{self.model_name}`,
         (
             SELECT 
             STRUCT(

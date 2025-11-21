@@ -38,7 +38,7 @@ Two main entry points:
   uv run -m label \
     --sessions-root logs/ `# label all sessions in logs dir` \
     --skip-existing `# skip sessions already processed` \
-    --client gemini \
+    --client gemini `# or vllm, bigquery` \
     --model gemini-2.5-pro \
     --annotate `# visualize mouse movement and click positions` \
     --visualize `# final video creation`
@@ -117,12 +117,27 @@ logs/session_name
 
 ### VLM client
 
-| Flag                     | Default                                                             |
-| ------------------------ | ------------------------------------------------------------------- |
-| `--client gemini / vllm` | `gemini`                                                            |
-| `--model`                | auto-selects: `gemini-2.5-flash` or `Qwen/Qwen3-VL-8B-Thinking-FP8` |
-| `--num-workers`          | `4`                                                                 |
-| `--vllm-url`             | none                                                                |
+| Flag                                | Default                                                                                  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| `--client gemini / vllm / bigquery` | `gemini`                                                                                 |
+| `--model`                           | auto-selects: `gemini-2.5-flash`, `Qwen/Qwen3-VL-8B-Thinking-FP8`, or `gemini-2.0-flash-exp` |
+| `--num-workers`                     | `4`                                                                                      |
+
+#### vLLM-specific options
+
+| Flag         | Description                       |
+| ------------ | --------------------------------- |
+| `--vllm-url` | vLLM server URL (e.g., http://localhost:8000) |
+
+#### BigQuery-specific options
+
+| Flag                         | Description                                                      |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `--bq-bucket-name`           | GCS bucket name for uploading videos                             |
+| `--bq-gcs-prefix`            | Prefix/folder path in GCS bucket (default: `video_chunks`)       |
+| `--bq-object-table-location` | Object table location (default: `us`)                            |
+
+> **Note**: For BigQuery, `--model` should be the full model reference (e.g., `dataset.model` or `project.dataset.model`)
 
 ### Output
 
@@ -183,6 +198,36 @@ uv run -m label \
 > vllm serve Qwen/Qwen3-VL-30B-A3B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 8 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines --enable-expert-parallel --enforce-eager
 >vllm serve Qwen/Qwen3-VL-8B-Thinking-FP8 --host 127.0.0.1 --port 8000 --tensor-parallel-size 4 --gpu-memory-utilization 0.9 --guided-decoding-backend outlines
 >```
+
+BigQuery batch processing:
+
+```bash
+uv run -m label \
+  --sessions-root logs/ \
+  --client bigquery \
+  --model my_dataset.gemini_flash_remote \
+  --bq-bucket-name my-bucket \
+  --bq-gcs-prefix my_folder \
+  --bq-object-table-location us.my-connection \
+  --annotate \
+  --visualize
+```
+
+> [!NOTE]
+> For using BigQuery ML with Gemini models:
+> 1. Create a remote model in BigQuery that connects to Vertex AI:
+> ```sql
+> CREATE OR REPLACE MODEL `my-project.my_dataset.gemini_flash_remote`
+> REMOTE WITH CONNECTION `my-project.us.my-connection`
+> OPTIONS (endpoint = 'gemini-2.0-flash-exp');
+> ```
+> 2. Set up a Cloud Storage bucket and ensure your service account has permissions to:
+>    - Write to the GCS bucket
+>    - Execute BigQuery ML queries
+>    - Access the remote model connection
+> 3. The `--model` parameter should be the full BigQuery model reference:
+>    - 2-part format: `my_dataset.gemini_flash_remote` (uses default project)
+>    - 3-part format: `my-project.my_dataset.gemini_flash_remote` (explicit project)
 
 ---
 

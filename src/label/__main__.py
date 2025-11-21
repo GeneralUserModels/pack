@@ -28,17 +28,27 @@ def parse_args():
     p.add_argument("--skip-existing", action="store_true", help="Skip sessions that have already been processed")
     p.add_argument("--visualize", action="store_true", help="Create annotated video visualizations after processing")
 
-    p.add_argument("--client", choices=["gemini", "vllm"], default="gemini")
+    p.add_argument("--client", choices=["gemini", "vllm", "bigquery"], default="gemini")
     p.add_argument("--model", default="")
     p.add_argument("--num-workers", type=int, default=4, help="Number of concurrent workers (set to 1 to disable concurrency)")
 
     vllm_group = p.add_argument_group("vLLM Options")
     vllm_group.add_argument("--vllm-url")
 
+    bq_group = p.add_argument_group("BigQuery Options")
+    bq_group.add_argument("--bq-bucket-name", help="GCS bucket name for uploading videos")
+    bq_group.add_argument("--bq-gcs-prefix", default="video_chunks", help="Prefix/folder path in GCS bucket")
+    bq_group.add_argument("--bq-object-table-location", default="us", help="Object table location (e.g., 'us' or 'us.screenomics-gemini')")
+
     args = p.parse_args()
 
     if not args.model:
-        args.model = 'gemini-2.5-flash' if args.client == 'gemini' else 'Qwen/Qwen3-VL-8B-Thinking-FP8'
+        if args.client == 'gemini':
+            args.model = 'gemini-2.5-flash'
+        elif args.client == 'vllm':
+            args.model = 'Qwen/Qwen3-VL-8B-Thinking-FP8'
+        elif args.client == 'bigquery':
+            args.model = 'dataset.model'  # Placeholder - user must provide full model reference
     if not args.prompt_file:
         args.prompt_file = "prompts/screenshots_only.txt" if args.screenshots_only else "prompts/default.txt"
 
@@ -117,6 +127,30 @@ def process_with_vllm(args, configs):
     )
 
 
+def process_with_bigquery(args, configs):
+    client = create_client(
+        'bigquery',
+        model_name=args.model,
+        bucket_name=args.bq_bucket_name,
+        gcs_prefix=args.bq_gcs_prefix,
+        object_table_location=args.bq_object_table_location,
+    )
+
+    processor = Processor(
+        client=client,
+        num_workers=args.num_workers,
+        screenshots_only=args.screenshots_only,
+        prompt_file=args.prompt_file,
+        max_time_gap=args.max_time_gap,
+    )
+
+    return processor.process_sessions(
+        configs,
+        fps=args.fps,
+        annotate=args.annotate and not args.screenshots_only,
+    )
+
+
 def main():
     args = parse_args()
 
@@ -130,6 +164,8 @@ def main():
         results = process_with_gemini(args, configs)
     elif args.client == 'vllm':
         results = process_with_vllm(args, configs)
+    elif args.client == 'bigquery':
+        results = process_with_bigquery(args, configs)
     else:
         raise ValueError(f"Unknown client: {args.client}")
 
