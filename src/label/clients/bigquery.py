@@ -52,6 +52,27 @@ class BigQueryClient(VLMClient):
         
         self.storage_client = storage.Client(project=project_id)
         self.bq_client = bigquery.Client(project=project_id)
+    
+    @staticmethod
+    def _escape_for_bq_triple_quoted_string(s: str) -> str:
+        """
+        Escape a string for use in BigQuery triple-quoted string literals.
+        
+        In BigQuery triple-quoted strings, you need to escape:
+        - Backslashes: single backslash becomes double backslash
+        - Triple quotes: must be escaped with backslash
+        
+        Args:
+            s: The string to escape
+            
+        Returns:
+            Escaped string safe for BigQuery triple-quoted string literals
+        """
+        # Escape backslashes first (order matters!)
+        s = s.replace('\\', '\\\\')
+        # Escape triple quotes
+        s = s.replace('"""', '\\"""')
+        return s
 
     def upload_file(self, path: str) -> str:
         """
@@ -102,17 +123,18 @@ class BigQueryClient(VLMClient):
         # Use provided schema or fall back to CAPTION_SCHEMA
         response_schema = schema or CAPTION_SCHEMA
         
-        # Escape single quotes for SQL string literals (BigQuery uses '' to escape ')
+        # Escape strings for BigQuery triple-quoted string literals
         # BigQuery requires literal values (not parameters) in ML.GENERATE_TEXT
-        escaped_prompt = prompt.replace("'", "''")
+        escaped_prompt = self._escape_for_bq_triple_quoted_string(prompt)
         
         # Convert response_schema to JSON string and escape for SQL
         response_schema_json = json.dumps(response_schema)
-        escaped_schema = response_schema_json.replace("'", "''")
+        escaped_schema = self._escape_for_bq_triple_quoted_string(response_schema_json)
         
         # Construct the BigQuery SQL query with all literal values
         # Using OBJ.FETCH_METADATA to reference the video file in GCS
         # Build the generation_config struct with literal values
+        # Use triple-quoted strings for multi-line prompt
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
@@ -120,14 +142,14 @@ class BigQueryClient(VLMClient):
         (
             SELECT 
             STRUCT(
-                '{escaped_prompt}', 
+                \"\"\"{escaped_prompt}\"\"\", 
                 OBJ.FETCH_METADATA(OBJ.MAKE_REF('{gcs_uri}', '{self.object_table_location}'))
             ) AS prompt 
         ),
         STRUCT(
             STRUCT(
                 {self.temperature} AS temperature,
-                JSON '{escaped_schema}' AS response_schema
+                JSON \"\"\"{escaped_schema}\"\"\" AS response_schema
             ) AS generation_config,
             TRUE AS FLATTEN_JSON_OUTPUT
         )
