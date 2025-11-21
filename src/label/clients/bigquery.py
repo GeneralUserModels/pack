@@ -102,22 +102,17 @@ class BigQueryClient(VLMClient):
         # Use provided schema or fall back to CAPTION_SCHEMA
         response_schema = schema or CAPTION_SCHEMA
         
-        # Build model_params JSON with schema and temperature
-        model_params = {
-            "generation_config": {
-                "temperature": self.temperature,
-                "response_schema": response_schema
-            }
-        }
-        model_params_json = json.dumps(model_params)
-        
         # Escape single quotes for SQL string literals (BigQuery uses '' to escape ')
         # BigQuery requires literal values (not parameters) in ML.GENERATE_TEXT
         escaped_prompt = prompt.replace("'", "''")
-        escaped_json = model_params_json.replace("'", "''")
+        
+        # Convert response_schema to JSON string and escape for SQL
+        response_schema_json = json.dumps(response_schema)
+        escaped_schema = response_schema_json.replace("'", "''")
         
         # Construct the BigQuery SQL query with all literal values
         # Using OBJ.FETCH_METADATA to reference the video file in GCS
+        # Build the generation_config struct with literal values
         query = f"""
         SELECT ml_generate_text_llm_result
         FROM ML.GENERATE_TEXT(
@@ -130,7 +125,10 @@ class BigQueryClient(VLMClient):
             ) AS prompt 
         ),
         STRUCT(
-            JSON '{escaped_json}' AS model_params,
+            STRUCT(
+                {self.temperature} AS temperature,
+                JSON '{escaped_schema}' AS response_schema
+            ) AS generation_config,
             TRUE AS FLATTEN_JSON_OUTPUT
         )
         )
@@ -138,6 +136,13 @@ class BigQueryClient(VLMClient):
         
         # No query parameters needed - all values are literals
         job_config = bigquery.QueryJobConfig()
+        
+        # Print query for debugging
+        print("=" * 80)
+        print("BigQuery ML.GENERATE_TEXT Query:")
+        print("=" * 80)
+        print(query)
+        print("=" * 80)
         
         # Execute the query
         query_job = self.bq_client.query(query, job_config=job_config)
