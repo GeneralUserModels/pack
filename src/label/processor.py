@@ -118,11 +118,11 @@ class Processor:
 
         # Group images by time gaps (split if > max_time_gap seconds apart)
         image_segments = self._split_images_by_time_gap(image_files, max_gap_seconds=self.max_time_gap)
-        
+
         print(f"\n[Segments] Created {len(image_segments)} segment(s) from {len(image_files)} images (max gap: {self.max_time_gap}s)")
         for idx, seg in enumerate(image_segments):
             print(f"  Segment {idx}: {len(seg)} images")
-        
+
         tasks = []
         chunk_index = 0
         cumulative_time = 0  # Track actual time across all segments
@@ -133,7 +133,7 @@ class Processor:
 
             # Create a video for this segment
             segment_video_path = config.chunks_dir / f"segment_{segment_idx:03d}.mp4"
-            
+
             if not segment_video_path.exists():
                 create_video(
                     segment_images,
@@ -159,7 +159,7 @@ class Processor:
             for i, video_path in enumerate(segment_chunks):
                 chunk_start_in_segment = i * config.chunk_duration
                 actual_chunk_duration = min(config.chunk_duration, segment_duration - chunk_start_in_segment)
-                
+
                 tasks.append(ChunkTask(
                     session_id=config.session_id,
                     chunk_index=chunk_index,
@@ -175,65 +175,65 @@ class Processor:
             cumulative_time += segment_duration
 
         return tasks
-    
+
     def _split_images_by_time_gap(self, image_files: List[Path], max_gap_seconds: float = 30) -> List[List[Path]]:
         """
         Split images into segments based on time gaps between consecutive images.
         If two images are more than max_gap_seconds apart, start a new segment.
-        
+
         Args:
             image_files: List of image file paths (should be sorted)
             max_gap_seconds: Maximum time gap in seconds before forcing a split
-            
+
         Returns:
             List of image segments, where each segment is a list of consecutive images
         """
         if not image_files:
             return []
-        
+
         segments = []
         current_segment = [image_files[0]]
         prev_timestamp = self._extract_timestamp_from_filename(image_files[0])
-        
+
         for img_path in image_files[1:]:
             curr_timestamp = self._extract_timestamp_from_filename(img_path)
-            
+
             # If we can't parse timestamps, just keep adding to current segment
             if prev_timestamp is None or curr_timestamp is None:
                 current_segment.append(img_path)
                 continue
-            
+
             # Check time gap
             time_gap = abs(curr_timestamp - prev_timestamp)
-            
+
             if time_gap > max_gap_seconds:
                 # Start a new segment
                 print(f"[Split] Time gap detected: {time_gap:.1f}s between screenshots (threshold: {max_gap_seconds}s)")
-                print(f"  Previous: {image_files[image_files.index(img_path)-1].name}")
+                print(f"  Previous: {image_files[image_files.index(img_path) - 1].name}")
                 print(f"  Current:  {img_path.name}")
                 segments.append(current_segment)
                 current_segment = [img_path]
             else:
                 current_segment.append(img_path)
-            
+
             prev_timestamp = curr_timestamp
-        
+
         # Add the last segment
         if current_segment:
             segments.append(current_segment)
-        
+
         return segments
-    
+
     def _extract_timestamp_from_filename(self, path: Path) -> Optional[float]:
         """
         Extract timestamp from filename. Supports multiple formats:
         1. Float timestamp: 1760702571.228687_reason_move_start.jpg
         2. DateTime format: w5_6713_sstetler1@msn.com20200810004157314.jpg (YYYYMMDDHHMMSSmmm)
-        
+
         Returns timestamp as float (seconds since epoch) or None if unable to parse
         """
         filename = path.name
-        
+
         # Try format 1: float timestamp at the beginning
         m = re.search(r'^(\d+\.\d+)', filename)
         if m:
@@ -241,7 +241,7 @@ class Processor:
                 return float(m.group(1))
             except Exception:
                 pass
-        
+
         # Try format 2: YYYYMMDDHHMMSSmmm datetime format
         # Look for 17 consecutive digits (YYYYMMDDHHMMSSMMM)
         m = re.search(r'(\d{17})', filename)
@@ -256,12 +256,12 @@ class Processor:
                 minute = int(timestamp_str[10:12])
                 second = int(timestamp_str[12:14])
                 millisecond = int(timestamp_str[14:17])
-                
+
                 dt = datetime(year, month, day, hour, minute, second, millisecond * 1000)
                 return dt.timestamp()
             except Exception:
                 pass
-        
+
         # Fallback: try file modification time
         try:
             return path.stat().st_mtime
@@ -292,9 +292,13 @@ class Processor:
         return results
 
     def _process_single_task(self, task: ChunkTask) -> any:
-        """Process single task with schema."""
+        """Process single task with schema and log token usage."""
         file_desc = self.client.upload_file(str(task.video_path.resolve()))
         response = self.client.generate(task.prompt, file_desc, schema=CAPTION_SCHEMA)
+
+        # Log token usage for this chunk
+        print(f"[Tokens] {task.session_id}/chunk_{task.chunk_index:03d}: "
+              f"input={response.input_tokens:,}, output={response.output_tokens:,}")
 
         result = response.json if not callable(response.json) else response.json()
         return result
@@ -307,9 +311,13 @@ class Processor:
 
         session_captions = {}
 
+        # Track tokens per session
+        session_tokens = {}
+
         for task, result in results:
             if task.session_id not in session_captions:
                 session_captions[task.session_id] = []
+                session_tokens[task.session_id] = {"input": 0, "output": 0}
 
             config = next(c for c in configs if c.session_id == task.session_id)
 
@@ -336,6 +344,28 @@ class Processor:
 
                 if not self.screenshots_only:
                     self._create_matched_captions(config, captions, fps)
+
+        # Print token summary per session and overall
+        print("\n" + "=" * 60)
+        print("TOKEN USAGE SUMMARY")
+        print("=" * 60)
+
+        overall_input = 0
+        overall_output = 0
+
+        for session_id in session_captions.keys():
+            # Get session stats from client
+            stats = self.client.get_token_stats()
+            print(f"\nSession: {session_id}")
+            print(f"  Captions generated: {len(session_captions[session_id])}")
+
+        # Print overall stats
+        stats = self.client.get_token_stats()
+        print(f"\n{'OVERALL TOTALS':^60}")
+        print(f"  Total input tokens:  {stats['input_tokens']:,}")
+        print(f"  Total output tokens: {stats['output_tokens']:,}")
+        print(f"  Total tokens:        {stats['total_tokens']:,}")
+        print("=" * 60 + "\n")
 
         return {sid: len(caps) for sid, caps in session_captions.items()}
 
