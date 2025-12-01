@@ -27,6 +27,9 @@ dependencies = [
     "pynput>=1.8.1",
     "scikit-image>=0.25.2",
     "google-genai>=1.45.0",
+    "openai>=2.8.1",
+    "google-cloud-storage>=3.6.0",
+    "google-cloud-bigquery>=3.38.0",
 ]
 
 [tool.uv]
