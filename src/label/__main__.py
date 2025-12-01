@@ -36,6 +36,7 @@ def parse_args():
     vllm_group.add_argument("--vllm-url")
 
     bq_group = p.add_argument_group("BigQuery Options")
+    bq_group.add_argument("--bq-project", help="GCP project ID for AI Platform endpoint")
     bq_group.add_argument("--bq-bucket-name", help="GCS bucket name for uploading videos")
     bq_group.add_argument("--bq-gcs-prefix", default="video_chunks", help="Prefix/folder path in GCS bucket")
     bq_group.add_argument("--bq-object-table-location", default="us", help="Object table location (e.g., 'us' or 'us.screenomics-gemini')")
@@ -134,6 +135,7 @@ def process_with_bigquery(args, configs):
         bucket_name=args.bq_bucket_name,
         gcs_prefix=args.bq_gcs_prefix,
         object_table_location=args.bq_object_table_location,
+        project_id=args.bq_project,
     )
 
     processor = Processor(

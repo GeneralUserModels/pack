@@ -7,16 +7,24 @@ from google.cloud import bigquery
 
 from label.clients.client import VLMClient, CAPTION_SCHEMA  # still imported, but we don't rely on it by default
 
+# example call-
+# uv run -m label \
+#   --session /home/jupyter/Omar/downloads/test@gmail.com \
+#   --screenshots-only \
+#   --client bigquery \
+#   --model gemini-3-pro-preview \
+#   --bq-project hs-nero-phi-reeves-haitech \
+#   --bq-bucket-name hs-nero-phi-reeves-haitech-project \
+#   --bq-gcs-prefix Shaikh_Omar \
+#   --bq-object-table-location us.screenomics-gemini
 
 class BigQueryResponse:
     def __init__(self, result_row):
-        # get rid of the JSON scaffolds-
-        self.result_row = result_row.replace("```json\n", "").replace("\n```", "")
+        self.result_row = result_row
         self._json = None
 
     @property
     def text(self) -> str:
-        # BigQuery returns the result in ml_generate_text_llm_result column
         return self.result_row
 
     @property
@@ -55,6 +63,7 @@ class BigQueryClient(VLMClient):
         self.object_table_location = object_table_location
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
+        self.project_id = project_id
 
         self.storage_client = storage.Client(project=project_id)
         self.bq_client = bigquery.Client(project=project_id)
@@ -102,7 +111,7 @@ class BigQueryClient(VLMClient):
         print(f"Uploaded {path} to {gcs_uri}")
 
         return gcs_uri
-
+    
     def generate(
         self,
         prompt: str,
@@ -120,40 +129,39 @@ class BigQueryClient(VLMClient):
         escaped_location = self._escape_for_bq_single_quoted_string(
             self.object_table_location
         )
-
-        # couldn't figure out how to pass a JSON schema.... :')
+                
+        response_params = {
+            "generation_config": {
+                "media_resolution": "MEDIA_RESOLUTION_HIGH",
+                "response_mime_type": "application/json"                
+            }
+        }
+        
+        response_params_json = json.dumps(response_params)
+        escaped_response_params = self._escape_for_bq_single_quoted_string(response_params_json)
+        
         query = f"""
-        SELECT *
-        FROM AI.GENERATE_TEXT(
-          MODEL `{self.model_name}`,
-          (
-            SELECT STRUCT(
-              '{escaped_prompt}' AS prompt,
+        SELECT
+          AI.GENERATE(
+            (
+              '{escaped_prompt}',
               OBJ.FETCH_METADATA(
                 OBJ.MAKE_REF('{escaped_gcs_uri}', '{escaped_location}')
-              ) AS media
-            ) AS prompt
-          ),
-          STRUCT(
-            {self.max_output_tokens} AS max_output_tokens,
-            {float(self.temperature)} AS temperature
-          )
-        )
+              )
+            ),
+            endpoint => 'https://aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/global/publishers/google/models/{self.model_name}',
+            model_params => JSON '{escaped_response_params}'
+          ) AS gen;
         """
-
+        
         job_config = bigquery.QueryJobConfig()
-
-        print("=" * 80)
-        print("BigQuery AI.GENERATE_TEXT Query:")
-        print("=" * 80)
-        print(query)
-        print("=" * 80)
 
         query_job = self.bq_client.query(query, job_config=job_config)
         results = query_job.result()
-
+        
         for row in results:
-            print(row[0])
-            return BigQueryResponse(row[0])
+            print(row[0]["result"])
+            return BigQueryResponse(row[0]["result"])
 
         raise RuntimeError("No results returned from BigQuery")
+
