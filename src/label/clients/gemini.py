@@ -36,7 +36,7 @@ class GeminiClient(VLMClient):
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
 
-    def upload_file(self, path: str) -> Any:
+    def upload_file(self, path: str, session_id: str = None) -> Any:
         video_file = self.client.files.upload(file=path)
 
         while True:

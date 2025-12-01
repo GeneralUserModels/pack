@@ -88,18 +88,22 @@ class BigQueryClient(VLMClient):
         s = s.replace("'", "\\'")
         return s
 
-    def upload_file(self, path: str) -> str:
+    def upload_file(self, path: str, session_id: str = None) -> str:
         """
         Upload file to GCS and return the GCS URI.
 
         Args:
             path: Local file path
+            session_id: Optional session identifier for namespacing uploads
 
         Returns:
             GCS URI (gs://bucket/path/to/file)
         """
         file_path = Path(path)
-        destination_blob_name = f"{self.gcs_prefix}/{file_path.name}"
+        if session_id:
+            destination_blob_name = f"{self.gcs_prefix}/{session_id}/{file_path.name}"
+        else:
+            destination_blob_name = f"{self.gcs_prefix}/{file_path.name}"
 
         bucket = self.storage_client.bucket(self.bucket_name)
         blob = bucket.blob(destination_blob_name)

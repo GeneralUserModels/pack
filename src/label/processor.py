@@ -293,7 +293,7 @@ class Processor:
 
     def _process_single_task(self, task: ChunkTask) -> any:
         """Process single task with schema."""
-        file_desc = self.client.upload_file(str(task.video_path.resolve()))
+        file_desc = self.client.upload_file(str(task.video_path.resolve()), session_id=task.session_id)
         response = self.client.generate(task.prompt, file_desc, schema=CAPTION_SCHEMA)
 
         result = response.json if not callable(response.json) else response.json()
