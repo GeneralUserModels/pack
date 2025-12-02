@@ -72,13 +72,20 @@ class GeminiClient(VLMClient):
         if file_descriptor:
             inputs.append(file_descriptor)
 
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.0,
-            response_schema=schema or CAPTION_SCHEMA,
-            thinking_config=types.ThinkingConfig(thinking_level="high"),
-            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH
-        )
+        if "gemini-3" in self.model_name:
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.0,
+                response_schema=schema or CAPTION_SCHEMA,
+                thinking_config=types.ThinkingConfig(thinking_level="high"),
+                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH
+            )
+        else:
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.0,
+                response_schema=schema or CAPTION_SCHEMA,
+            )
 
         res = self.client.models.generate_content(
             model=self.model_name,
