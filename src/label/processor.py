@@ -1,5 +1,6 @@
 import re
 import json
+import math
 from pathlib import Path
 from typing import List, Tuple, Optional
 from datetime import datetime
@@ -123,56 +124,82 @@ class Processor:
         for idx, seg in enumerate(image_segments):
             print(f"  Segment {idx}: {len(seg)} images")
         
-        tasks = []
+        # At 1 fps, chunk_duration seconds = chunk_duration images
+        images_per_chunk = config.chunk_duration * fps
+
+        # Build list of all chunks to create (across all segments)
+        chunk_jobs = []
         chunk_index = 0
-        cumulative_time = 0  # Track actual time across all segments
+        cumulative_time = 0
 
         for segment_idx, segment_images in enumerate(image_segments):
             if not segment_images:
                 continue
 
-            # Create a video for this segment
-            segment_video_path = config.chunks_dir / f"segment_{segment_idx:03d}.mp4"
+            segment_duration = len(segment_images) / fps
+            num_chunks = math.ceil(len(segment_images) / images_per_chunk)
             
-            if not segment_video_path.exists():
+            print(f"[Chunk] Segment {segment_idx}: Preparing {num_chunks} chunk(s) from {len(segment_images)} images")
+
+            for i in range(num_chunks):
+                start_img_idx = i * images_per_chunk
+                end_img_idx = min((i + 1) * images_per_chunk, len(segment_images))
+                chunk_images = segment_images[start_img_idx:end_img_idx]
+                
+                if not chunk_images:
+                    continue
+
+                chunk_video_path = config.chunks_dir / f"{chunk_index:03d}.mp4"
+                chunk_start_in_segment = i * config.chunk_duration
+                actual_chunk_duration = len(chunk_images) / fps
+                
+                chunk_jobs.append({
+                    'chunk_index': chunk_index,
+                    'chunk_images': chunk_images,
+                    'chunk_video_path': chunk_video_path,
+                    'chunk_start_time': cumulative_time + chunk_start_in_segment,
+                    'actual_duration': actual_chunk_duration,
+                    'fps': fps
+                })
+                chunk_index += 1
+
+            cumulative_time += segment_duration
+
+        # Parallel video creation
+        def create_chunk_video(job):
+            if not job['chunk_video_path'].exists():
                 create_video(
-                    segment_images,
-                    segment_video_path,
-                    fps=fps,
+                    job['chunk_images'],
+                    job['chunk_video_path'],
+                    fps=job['fps'],
                     pad_to=None,
                     annotate=False,
                     aggregations=None,
                     session_dir=None
                 )
+            return job
 
-            # Get the actual duration of this segment video
-            from label.video import get_video_duration
-            segment_duration = get_video_duration(segment_video_path)
-            if segment_duration is None:
-                print(f"Warning: Could not get duration for {segment_video_path}, skipping segment")
-                continue
+        print(f"[Encode] Creating {len(chunk_jobs)} chunk videos with {self.num_workers} parallel workers...")
+        
+        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            completed_jobs = list(tqdm(
+                executor.map(create_chunk_video, chunk_jobs),
+                total=len(chunk_jobs),
+                desc="Encoding chunks"
+            ))
 
-            # Split this segment video into chunks based on chunk_duration
-            segment_chunks = split_video(segment_video_path, config.chunk_duration, config.chunks_dir, start_index=chunk_index)
-
-            # Create tasks for each chunk with correct timing
-            for i, video_path in enumerate(segment_chunks):
-                chunk_start_in_segment = i * config.chunk_duration
-                actual_chunk_duration = min(config.chunk_duration, segment_duration - chunk_start_in_segment)
-                
-                tasks.append(ChunkTask(
-                    session_id=config.session_id,
-                    chunk_index=chunk_index,
-                    video_path=VideoPath(video_path),
-                    prompt=self.prompt,
-                    aggregations=[],
-                    chunk_start_time=cumulative_time + chunk_start_in_segment,
-                    chunk_duration=int(actual_chunk_duration)
-                ))
-                chunk_index += 1
-
-            # Update cumulative time for next segment
-            cumulative_time += segment_duration
+        # Build tasks from completed jobs
+        tasks = []
+        for job in completed_jobs:
+            tasks.append(ChunkTask(
+                session_id=config.session_id,
+                chunk_index=job['chunk_index'],
+                video_path=VideoPath(job['chunk_video_path']),
+                prompt=self.prompt,
+                aggregations=[],
+                chunk_start_time=job['chunk_start_time'],
+                chunk_duration=int(job['actual_duration'])
+            ))
 
         return tasks
     
@@ -293,7 +320,7 @@ class Processor:
 
     def _process_single_task(self, task: ChunkTask) -> any:
         """Process single task with schema."""
-        file_desc = self.client.upload_file(str(task.video_path.resolve()))
+        file_desc = self.client.upload_file(str(task.video_path.resolve()), session_id=task.session_id)
         response = self.client.generate(task.prompt, file_desc, schema=CAPTION_SCHEMA)
 
         result = response.json if not callable(response.json) else response.json()

@@ -56,7 +56,7 @@ class VLLMClient(VLMClient):
         print(f"[VLLMClient] Connected to {base_url}")
         print(f"[VLLMClient] Model: {model_name}")
 
-    def upload_file(self, path: str) -> Dict:
+    def upload_file(self, path: str, session_id: str = None) -> Dict:
         """
         Register a file and return its descriptor with pre-encoded data.
         """

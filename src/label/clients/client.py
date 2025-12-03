@@ -18,7 +18,7 @@ CAPTION_SCHEMA = {
 
 class VLMClient(ABC):
     @abstractmethod
-    def upload_file(self, path: str) -> Any:
+    def upload_file(self, path: str, session_id: str = None) -> Any:
         pass
 
     @abstractmethod
