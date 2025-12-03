@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-from datasets import Dataset, Features, Value, Image as HFImage
+from datasets import Dataset, DatasetDict, Features, Value, Image as HFImage
 
 
 def parse_timestamp_from_filename(filename: str) -> Optional[float]:
@@ -240,7 +240,7 @@ def main():
 
     # Create HuggingFace dataset
     print("Creating HuggingFace dataset...")
-    dataset = create_hf_dataset(records)
+    dataset = DatasetDict({"train": create_hf_dataset(records)})
 
     # Save dataset
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +248,7 @@ def main():
     dataset.save_to_disk(str(output_dir))
 
     print(f"Dataset saved successfully with {len(dataset)} examples!")
-    print(f"\nDataset info:")
+    print("\nDataset info:")
     print(dataset)
 
 
