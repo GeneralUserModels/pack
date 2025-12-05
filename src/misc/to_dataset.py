@@ -171,9 +171,67 @@ def create_hf_dataset(records: List[Dict]) -> Dataset:
     return dataset
 
 
+def split_dataset(dataset: Dataset, split_ratios: List[float]) -> DatasetDict:
+    """
+    Split dataset into train/test/validation sets.
+
+    Args:
+        dataset: The full dataset to split
+        split_ratios: List of [train_ratio, test_ratio, val_ratio]
+
+    Returns:
+        DatasetDict with 'train', 'test', and 'validation' splits
+    """
+    train_ratio, test_ratio, val_ratio = split_ratios
+
+    # Validate ratios sum to 1.0
+    total = sum(split_ratios)
+    if not (0.99 <= total <= 1.01):  # Allow small floating point errors
+        raise ValueError(f"Split ratios must sum to 1.0, got {total}")
+
+    # Calculate split sizes
+    total_size = len(dataset)
+    train_size = int(total_size * train_ratio)
+    test_size = int(total_size * test_ratio)
+    # Validation gets the remainder to handle rounding
+    val_size = total_size - train_size - test_size
+
+    print(f"\nSplit sizes: train={train_size}, test={test_size}, validation={val_size}")
+
+    # Create splits
+    train_test_split = dataset.train_test_split(
+        test_size=test_size + val_size,
+        seed=42
+    )
+
+    test_val_split = train_test_split['test'].train_test_split(
+        test_size=val_size,
+        seed=42
+    )
+
+    return DatasetDict({
+        'train': train_test_split['train'],
+        'test': test_val_split['train'],
+        'validation': test_val_split['test']
+    })
+
+
+def parse_split_ratios(ratio_str: str) -> List[float]:
+    """Parse split ratio string like '0.5,0.25,0.25' into list of floats."""
+    try:
+        ratios = [float(x.strip()) for x in ratio_str.split(',')]
+        if len(ratios) != 3:
+            raise ValueError("Must provide exactly 3 ratios")
+        if any(r < 0 or r > 1 for r in ratios):
+            raise ValueError("All ratios must be between 0 and 1")
+        return ratios
+    except Exception as e:
+        raise ValueError(f"Invalid split ratios format: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert JSONL data to HuggingFace Dataset'
+        description='Convert JSONL data to HuggingFace Dataset with train/test/validation splits'
     )
     parser.add_argument(
         'jsonl_path',
@@ -198,6 +256,12 @@ def main():
         choices=[1, 2],
         help='Input format (1 or 2). If not specified, auto-detect from first line.'
     )
+    parser.add_argument(
+        '--split-ratios',
+        type=str,
+        default='0.5,0.25,0.25',
+        help='Split ratios for train,test,validation (default: 0.5,0.25,0.25)'
+    )
 
     args = parser.parse_args()
 
@@ -206,6 +270,10 @@ def main():
 
     if not jsonl_path.exists():
         raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
+
+    # Parse split ratios
+    split_ratios = parse_split_ratios(args.split_ratios)
+    print(f"Using split ratios - train: {split_ratios[0]}, test: {split_ratios[1]}, validation: {split_ratios[2]}")
 
     # Auto-detect format if not specified
     input_format = args.format
@@ -240,16 +308,23 @@ def main():
 
     # Create HuggingFace dataset
     print("Creating HuggingFace dataset...")
-    dataset = DatasetDict({"train": create_hf_dataset(records)})
+    full_dataset = create_hf_dataset(records)
+
+    # Split dataset
+    print("Splitting dataset...")
+    dataset = split_dataset(full_dataset, split_ratios)
 
     # Save dataset
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving dataset to {output_dir}...")
     dataset.save_to_disk(str(output_dir))
 
-    print(f"Dataset saved successfully with {len(dataset)} examples!")
+    print("\nDataset saved successfully!")
     print("\nDataset info:")
     print(dataset)
+    print(f"\nTrain examples: {len(dataset['train'])}")
+    print(f"Test examples: {len(dataset['test'])}")
+    print(f"Validation examples: {len(dataset['validation'])}")
 
 
 if __name__ == '__main__':
