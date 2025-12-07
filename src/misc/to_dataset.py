@@ -201,12 +201,12 @@ def split_dataset(dataset: Dataset, split_ratios: List[float]) -> DatasetDict:
     # Create splits
     train_test_split = dataset.train_test_split(
         test_size=test_size + val_size,
-        seed=42
+        shuffle=False,
     )
 
     test_val_split = train_test_split['test'].train_test_split(
         test_size=val_size,
-        seed=42
+        shuffle=False,
     )
 
     return DatasetDict({
