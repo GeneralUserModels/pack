@@ -12,6 +12,126 @@ from label.video import create_video, split_video, compute_max_size
 from label.clients import VLMClient, CAPTION_SCHEMA
 
 
+# ============================================================================
+# Hash-based deduplication utilities (standalone functions for reuse)
+# ============================================================================
+
+def load_hash_cache(cache_path: str) -> Optional[Dict[str, int]]:
+    """Load hash cache from JSON file. Returns path -> hash_int mapping.
+    
+    Normalizes paths to use the last 3 components (user/screenshots/filename)
+    as the key for robust matching regardless of absolute/relative paths.
+    """
+    p = Path(cache_path)
+    if not p.exists():
+        print(f"[Warning] Hash cache not found: {cache_path}")
+        return None
+    
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        entries = data.get("entries", {})
+        hash_map = {}
+        for path, info in entries.items():
+            hash_int = info.get("hash_int")
+            if hash_int is not None:
+                # Normalize: use last 3 path components (user/screenshots/filename)
+                parts = Path(path).parts
+                if len(parts) >= 3:
+                    key = str(Path(*parts[-3:]))
+                else:
+                    key = path
+                hash_map[key] = hash_int
+        
+        print(f"[Hash] Loaded {len(hash_map):,} hashes from cache")
+        return hash_map
+    except Exception as e:
+        print(f"[Warning] Failed to load hash cache: {e}")
+        return None
+
+
+def get_hash_key(img_path: Path) -> str:
+    """Get normalized key for hash lookup (last 3 path components)."""
+    parts = img_path.parts
+    if len(parts) >= 3:
+        return str(Path(*parts[-3:]))
+    return str(img_path)
+
+
+def hamming_distance(h1: int, h2: int) -> int:
+    """Compute hamming distance between two integer hashes."""
+    return (h1 ^ h2).bit_count()
+
+
+def dedupe_images_by_hash(
+    image_files: List[Path],
+    hash_map: Dict[str, int],
+    dedupe_threshold: int = 1,
+    verbose: bool = True
+) -> List[Path]:
+    """
+    Filter consecutive images that are too similar (hamming distance <= dedupe_threshold).
+    
+    Only keeps images where the hash difference from the previous kept image is > threshold.
+    This collapses runs of near-identical images into a single representative.
+    
+    Args:
+        image_files: List of image file paths (should be sorted)
+        hash_map: Dictionary mapping normalized path keys to hash integers
+        dedupe_threshold: Maximum hamming distance to consider images as duplicates
+        verbose: Whether to print deduplication statistics
+    
+    Returns:
+        Filtered list of image paths
+    """
+    if not hash_map or not image_files:
+        return image_files
+    
+    original_count = len(image_files)
+    kept_images = []
+    last_kept_hash = None
+    
+    for img_path in image_files:
+        hash_key = get_hash_key(img_path)
+        curr_hash = hash_map.get(hash_key)
+        
+        if curr_hash is None:
+            # No hash available, keep the image
+            kept_images.append(img_path)
+            last_kept_hash = None
+            continue
+        
+        if last_kept_hash is None:
+            # First image with a hash, always keep
+            kept_images.append(img_path)
+            last_kept_hash = curr_hash
+            continue
+        
+        distance = hamming_distance(last_kept_hash, curr_hash)
+        
+        if distance > dedupe_threshold:
+            # Different enough, keep it
+            kept_images.append(img_path)
+            last_kept_hash = curr_hash
+        # else: skip this image (too similar to last kept)
+    
+    if verbose:
+        kept_count = len(kept_images)
+        dropped_count = original_count - kept_count
+        pct_saved = (dropped_count / original_count * 100) if original_count > 0 else 0
+        
+        print(f"[Dedupe] Kept {kept_count:,} of {original_count:,} images "
+              f"(dropped {dropped_count:,}, saved {pct_saved:.1f}%) "
+              f"[threshold={dedupe_threshold}]")
+    
+    return kept_images
+
+
+# ============================================================================
+# Processor class
+# ============================================================================
+
 class Processor:
     def __init__(
         self,
@@ -31,108 +151,13 @@ class Processor:
         self.prompt = self._load_prompt(prompt_file)
         self.max_time_gap = max_time_gap
         self.dedupe_threshold = dedupe_threshold
-        self.hash_map = self._load_hash_cache(hash_cache_path) if hash_cache_path else None
+        self.hash_map = load_hash_cache(hash_cache_path) if hash_cache_path else None
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
         if not p.exists():
             p = Path(__file__).parent / path
         return p.read_text()
-
-    def _load_hash_cache(self, cache_path: str) -> Optional[Dict[str, int]]:
-        """Load hash cache from JSON file. Returns path -> hash_int mapping.
-        
-        Normalizes paths to use the last 3 components (user/screenshots/filename)
-        as the key for robust matching regardless of absolute/relative paths.
-        """
-        p = Path(cache_path)
-        if not p.exists():
-            print(f"[Warning] Hash cache not found: {cache_path}")
-            return None
-        
-        try:
-            with p.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            entries = data.get("entries", {})
-            hash_map = {}
-            for path, info in entries.items():
-                hash_int = info.get("hash_int")
-                if hash_int is not None:
-                    # Normalize: use last 3 path components (user/screenshots/filename)
-                    parts = Path(path).parts
-                    if len(parts) >= 3:
-                        key = str(Path(*parts[-3:]))
-                    else:
-                        key = path
-                    hash_map[key] = hash_int
-            
-            print(f"[Hash] Loaded {len(hash_map):,} hashes from cache")
-            return hash_map
-        except Exception as e:
-            print(f"[Warning] Failed to load hash cache: {e}")
-            return None
-    
-    def _get_hash_key(self, img_path: Path) -> str:
-        """Get normalized key for hash lookup (last 3 path components)."""
-        parts = img_path.parts
-        if len(parts) >= 3:
-            return str(Path(*parts[-3:]))
-        return str(img_path)
-
-    def _hamming_distance(self, h1: int, h2: int) -> int:
-        """Compute hamming distance between two integer hashes."""
-        return (h1 ^ h2).bit_count()
-
-    def _dedupe_images_by_hash(self, image_files: List[Path]) -> List[Path]:
-        """
-        Filter consecutive images that are too similar (hamming distance <= dedupe_threshold).
-        
-        Only keeps images where the hash difference from the previous kept image is > threshold.
-        This collapses runs of near-identical images into a single representative.
-        """
-        if not self.hash_map or not image_files:
-            return image_files
-        
-        original_count = len(image_files)
-        kept_images = []
-        last_kept_hash = None
-        
-        for img_path in image_files:
-            hash_key = self._get_hash_key(img_path)
-            curr_hash = self.hash_map.get(hash_key)
-            
-            if curr_hash is None:
-                # No hash available, keep the image
-                kept_images.append(img_path)
-                last_kept_hash = None
-                continue
-            
-            if last_kept_hash is None:
-                # First image with a hash, always keep
-                kept_images.append(img_path)
-                last_kept_hash = curr_hash
-                continue
-            
-            distance = self._hamming_distance(last_kept_hash, curr_hash)
-            
-            if distance > self.dedupe_threshold:
-                # Different enough, keep it
-                kept_images.append(img_path)
-                last_kept_hash = curr_hash
-            # else: skip this image (too similar to last kept)
-        
-        kept_count = len(kept_images)
-        dropped_count = original_count - kept_count
-        pct_saved = (dropped_count / original_count * 100) if original_count > 0 else 0
-        
-        print(f"[Dedupe] Kept {kept_count:,} of {original_count:,} images "
-              f"(dropped {dropped_count:,}, saved {pct_saved:.1f}%) "
-              f"[threshold={self.dedupe_threshold}]")
-        
-
-        
-        return kept_images
 
     def process_sessions(
         self,
@@ -227,7 +252,7 @@ class Processor:
 
         # Deduplicate consecutive similar images using hash cache
         if self.hash_map:
-            image_files = self._dedupe_images_by_hash(image_files)
+            image_files = dedupe_images_by_hash(image_files, self.hash_map, self.dedupe_threshold)
 
         if not image_files:
             return []
