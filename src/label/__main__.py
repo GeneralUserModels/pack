@@ -24,13 +24,17 @@ def parse_args():
     p.add_argument("--image-extensions", nargs="+", default=[".jpg", ".jpeg", ".png"], help="Image file extensions to consider")
     p.add_argument("--max-time-gap", type=float, default=300.0, help="Maximum time gap (seconds) between images before forcing a video split (default: 120 = 2 minutes)")
     p.add_argument("--prompt-file", default=None, help="Path to prompt file (default: prompts/default.txt or prompts/screenshots_only.txt if screenshots only)")
+    p.add_argument("--hash-cache", type=str, default=None, help="Path to hash_cache.json for deduplicating consecutive similar images")
+    p.add_argument("--dedupe-threshold", type=int, default=1, help="Hamming distance threshold for deduplication (drop if <= threshold, default: 1)")
     p.add_argument("--annotate", action="store_true", help="Annotate videos with cursor positions and clicks (only for standard processing)")
     p.add_argument("--skip-existing", action="store_true", help="Skip sessions that have already been processed")
     p.add_argument("--visualize", action="store_true", help="Create annotated video visualizations after processing")
+    p.add_argument("--encode-only", action="store_true", help="Only encode videos (create chunks), skip labeling. Useful for pre-processing before running the full pipeline.")
 
     p.add_argument("--client", choices=["gemini", "vllm", "bigquery"], default="gemini")
     p.add_argument("--model", default="")
-    p.add_argument("--num-workers", type=int, default=4, help="Number of concurrent workers (set to 1 to disable concurrency)")
+    p.add_argument("--encode-workers", type=int, default=8, help="Number of parallel workers for video encoding")
+    p.add_argument("--label-workers", type=int, default=4, help="Number of parallel workers for VLM labeling")
 
     vllm_group = p.add_argument_group("vLLM Options")
     vllm_group.add_argument("--vllm-url")
@@ -93,16 +97,20 @@ def process_with_gemini(args, configs):
 
     processor = Processor(
         client=client,
-        num_workers=args.num_workers,
+        encode_workers=args.encode_workers,
+        label_workers=args.label_workers,
         screenshots_only=args.screenshots_only,
         prompt_file=args.prompt_file,
         max_time_gap=args.max_time_gap,
+        hash_cache_path=args.hash_cache,
+        dedupe_threshold=args.dedupe_threshold,
     )
 
     return processor.process_sessions(
         configs,
         fps=args.fps,
         annotate=args.annotate and not args.screenshots_only,
+        encode_only=args.encode_only,
     )
 
 
@@ -115,16 +123,20 @@ def process_with_vllm(args, configs):
 
     processor = Processor(
         client=client,
-        num_workers=args.num_workers,
+        encode_workers=args.encode_workers,
+        label_workers=args.label_workers,
         screenshots_only=args.screenshots_only,
         prompt_file=args.prompt_file,
         max_time_gap=args.max_time_gap,
+        hash_cache_path=args.hash_cache,
+        dedupe_threshold=args.dedupe_threshold,
     )
 
     return processor.process_sessions(
         configs,
         fps=args.fps,
         annotate=args.annotate and not args.screenshots_only,
+        encode_only=args.encode_only,
     )
 
 
@@ -140,16 +152,20 @@ def process_with_bigquery(args, configs):
 
     processor = Processor(
         client=client,
-        num_workers=args.num_workers,
+        encode_workers=args.encode_workers,
+        label_workers=args.label_workers,
         screenshots_only=args.screenshots_only,
         prompt_file=args.prompt_file,
         max_time_gap=args.max_time_gap,
+        hash_cache_path=args.hash_cache,
+        dedupe_threshold=args.dedupe_threshold,
     )
 
     return processor.process_sessions(
         configs,
         fps=args.fps,
         annotate=args.annotate and not args.screenshots_only,
+        encode_only=args.encode_only,
     )
 
 
