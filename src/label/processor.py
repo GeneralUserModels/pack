@@ -2,7 +2,7 @@ import re
 import json
 import math
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -16,16 +16,22 @@ class Processor:
     def __init__(
         self,
         client: VLMClient,
-        num_workers: int = 4,
+        encode_workers: int = 8,
+        label_workers: int = 4,
         screenshots_only: bool = False,
         prompt_file: str = "prompts/default.txt",
         max_time_gap: float = 300.0,
+        hash_cache_path: Optional[str] = None,
+        dedupe_threshold: int = 1,
     ):
         self.client = client
-        self.num_workers = num_workers
+        self.encode_workers = encode_workers
+        self.label_workers = label_workers
         self.screenshots_only = screenshots_only
         self.prompt = self._load_prompt(prompt_file)
         self.max_time_gap = max_time_gap
+        self.dedupe_threshold = dedupe_threshold
+        self.hash_map = self._load_hash_cache(hash_cache_path) if hash_cache_path else None
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
@@ -33,14 +39,111 @@ class Processor:
             p = Path(__file__).parent / path
         return p.read_text()
 
+    def _load_hash_cache(self, cache_path: str) -> Optional[Dict[str, int]]:
+        """Load hash cache from JSON file. Returns path -> hash_int mapping.
+        
+        Normalizes paths to use the last 3 components (user/screenshots/filename)
+        as the key for robust matching regardless of absolute/relative paths.
+        """
+        p = Path(cache_path)
+        if not p.exists():
+            print(f"[Warning] Hash cache not found: {cache_path}")
+            return None
+        
+        try:
+            with p.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            entries = data.get("entries", {})
+            hash_map = {}
+            for path, info in entries.items():
+                hash_int = info.get("hash_int")
+                if hash_int is not None:
+                    # Normalize: use last 3 path components (user/screenshots/filename)
+                    parts = Path(path).parts
+                    if len(parts) >= 3:
+                        key = str(Path(*parts[-3:]))
+                    else:
+                        key = path
+                    hash_map[key] = hash_int
+            
+            print(f"[Hash] Loaded {len(hash_map):,} hashes from cache")
+            return hash_map
+        except Exception as e:
+            print(f"[Warning] Failed to load hash cache: {e}")
+            return None
+    
+    def _get_hash_key(self, img_path: Path) -> str:
+        """Get normalized key for hash lookup (last 3 path components)."""
+        parts = img_path.parts
+        if len(parts) >= 3:
+            return str(Path(*parts[-3:]))
+        return str(img_path)
+
+    def _hamming_distance(self, h1: int, h2: int) -> int:
+        """Compute hamming distance between two integer hashes."""
+        return (h1 ^ h2).bit_count()
+
+    def _dedupe_images_by_hash(self, image_files: List[Path]) -> List[Path]:
+        """
+        Filter consecutive images that are too similar (hamming distance <= dedupe_threshold).
+        
+        Only keeps images where the hash difference from the previous kept image is > threshold.
+        This collapses runs of near-identical images into a single representative.
+        """
+        if not self.hash_map or not image_files:
+            return image_files
+        
+        original_count = len(image_files)
+        kept_images = []
+        last_kept_hash = None
+        
+        for img_path in image_files:
+            hash_key = self._get_hash_key(img_path)
+            curr_hash = self.hash_map.get(hash_key)
+            
+            if curr_hash is None:
+                # No hash available, keep the image
+                kept_images.append(img_path)
+                last_kept_hash = None
+                continue
+            
+            if last_kept_hash is None:
+                # First image with a hash, always keep
+                kept_images.append(img_path)
+                last_kept_hash = curr_hash
+                continue
+            
+            distance = self._hamming_distance(last_kept_hash, curr_hash)
+            
+            if distance > self.dedupe_threshold:
+                # Different enough, keep it
+                kept_images.append(img_path)
+                last_kept_hash = curr_hash
+            # else: skip this image (too similar to last kept)
+        
+        kept_count = len(kept_images)
+        dropped_count = original_count - kept_count
+        pct_saved = (dropped_count / original_count * 100) if original_count > 0 else 0
+        
+        print(f"[Dedupe] Kept {kept_count:,} of {original_count:,} images "
+              f"(dropped {dropped_count:,}, saved {pct_saved:.1f}%) "
+              f"[threshold={self.dedupe_threshold}]")
+        
+
+        
+        return kept_images
+
     def process_sessions(
         self,
         configs: List[SessionConfig],
         fps: int = 1,
-        annotate: bool = False
+        annotate: bool = False,
+        encode_only: bool = False
     ) -> dict:
 
         tasks = []
+        config_map = {c.session_id: c for c in configs}
 
         for config in tqdm(configs, desc="Preparing"):
             config.ensure_dirs()
@@ -50,9 +153,14 @@ class Processor:
             else:
                 tasks.extend(self._prepare_standard(config, fps, annotate))
 
-        print(f"[Processor] Processing {len(tasks)} chunks with {min(self.num_workers, len(tasks))} concurrent workers")
+        print(f"[Processor] Prepared {len(tasks)} chunks (encode: {self.encode_workers} workers)")
 
-        results = self._process_tasks(tasks)
+        if encode_only:
+            print(f"[Encode-only] Stopping after encoding. Run again without --encode-only to label.")
+            return {c.session_id: 0 for c in configs}
+
+        print(f"[Processor] Labeling with {self.label_workers} workers")
+        results = self._process_tasks(tasks, config_map)
 
         return self._save_results(results, configs, fps)
 
@@ -113,6 +221,13 @@ class Processor:
             f for f in config.screenshots_dir.iterdir()
             if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png"}
         ])
+
+        if not image_files:
+            return []
+
+        # Deduplicate consecutive similar images using hash cache
+        if self.hash_map:
+            image_files = self._dedupe_images_by_hash(image_files)
 
         if not image_files:
             return []
@@ -179,9 +294,9 @@ class Processor:
                 )
             return job
 
-        print(f"[Encode] Creating {len(chunk_jobs)} chunk videos with {self.num_workers} parallel workers...")
+        print(f"[Encode] Creating {len(chunk_jobs)} chunk videos with {self.encode_workers} parallel workers...")
         
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.encode_workers) as executor:
             completed_jobs = list(tqdm(
                 executor.map(create_chunk_video, chunk_jobs),
                 total=len(chunk_jobs),
@@ -295,22 +410,50 @@ class Processor:
         except Exception:
             return None
 
-    def _process_tasks(self, tasks: List[ChunkTask]) -> List[Tuple[ChunkTask, any]]:
-        """Process tasks with configurable concurrency using num_workers."""
+    def _process_tasks(self, tasks: List[ChunkTask], config_map: dict) -> List[Tuple[ChunkTask, any]]:
+        """Process tasks with configurable concurrency using num_workers.
+        
+        Supports resume: skips tasks that already have caption files.
+        Saves incrementally: writes caption file immediately after each task completes.
+        """
         results = []
+        tasks_to_process = []
+        
+        # Check for existing captions (resume support)
+        for task in tasks:
+            config = config_map[task.session_id]
+            result_file = config.captions_dir / f"{task.chunk_index:03d}.json"
+            
+            if result_file.exists():
+                # Load existing result
+                with open(result_file, 'r') as f:
+                    data = json.load(f)
+                results.append((task, data.get('result', {})))
+            else:
+                tasks_to_process.append(task)
+        
+        if results:
+            print(f"[Resume] Loaded {len(results)} existing captions, {len(tasks_to_process)} remaining")
+        
+        if not tasks_to_process:
+            print("[Resume] All chunks already captioned")
+            return results
 
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=self.label_workers) as executor:
             future_to_task = {
                 executor.submit(self._process_single_task, task): task
-                for task in tasks
+                for task in tasks_to_process
             }
 
-            with tqdm(total=len(tasks), desc="Processing") as pbar:
+            with tqdm(total=len(tasks_to_process), desc="Processing") as pbar:
                 for future in as_completed(future_to_task):
                     task = future_to_task[future]
+                    config = config_map[task.session_id]
                     try:
                         result = future.result()
                         results.append((task, result))
+                        # Save immediately after processing
+                        self._save_chunk_result(config, task, result)
                     except Exception as e:
                         print(f"\n[Error] {task.session_id}/chunk_{task.chunk_index}: {e}")
                         results.append((task, {"error": str(e)}))
@@ -326,31 +469,37 @@ class Processor:
         result = response.json if not callable(response.json) else response.json()
         return result
 
+    def _save_chunk_result(self, config: SessionConfig, task: ChunkTask, result: any):
+        """Save a single chunk's result immediately after processing."""
+        # Save aggregations if applicable (standard mode only)
+        if not self.screenshots_only and task.aggregations:
+            agg_file = config.aggregations_dir / f"{task.chunk_index:03d}.json"
+            with open(agg_file, 'w') as f:
+                json.dump([a.to_dict() for a in task.aggregations], f, indent=2)
+
+        # Save caption result
+        result_file = config.captions_dir / f"{task.chunk_index:03d}.json"
+        with open(result_file, 'w') as f:
+            json.dump({
+                "chunk_index": task.chunk_index,
+                "result": result
+            }, f, indent=2)
+
     def _save_results(
         self, results: List[Tuple[ChunkTask, any]],
         configs: List[SessionConfig],
         fps: int
     ) -> dict:
-
+        """Merge all chunk results and save final captions.
+        
+        Note: Individual chunk files are already saved incrementally by _save_chunk_result
+        or loaded from existing files during resume.
+        """
         session_captions = {}
 
         for task, result in results:
             if task.session_id not in session_captions:
                 session_captions[task.session_id] = []
-
-            config = next(c for c in configs if c.session_id == task.session_id)
-
-            if not self.screenshots_only and task.aggregations:
-                agg_file = config.aggregations_dir / f"{task.chunk_index:03d}.json"
-                with open(agg_file, 'w') as f:
-                    json.dump([a.to_dict() for a in task.aggregations], f, indent=2)
-
-            result_file = config.captions_dir / f"{task.chunk_index:03d}.json"
-            with open(result_file, 'w') as f:
-                json.dump({
-                    "chunk_index": task.chunk_index,
-                    "result": result
-                }, f, indent=2)
 
             captions = self._extract_captions(result, task)
             session_captions[task.session_id].extend(captions)
