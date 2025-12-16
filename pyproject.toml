@@ -30,7 +30,6 @@ dependencies = [
     "openai>=2.8.1",
     "google-cloud-storage>=3.6.0",
     "google-cloud-bigquery>=3.38.0",
-    "tornado>=6.5.4",
 ]
 
 [tool.uv]
