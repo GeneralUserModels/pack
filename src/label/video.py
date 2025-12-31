@@ -302,16 +302,17 @@ def create_video(
         if pad_to:
             w, h = pad_to
             vf_parts.append(f"scale=iw*min({w}/iw\\,{h}/ih):ih*min({w}/iw\\,{h}/ih),pad={w}:{h}:(ow-iw)/2:(oh-ih)/2")
+        
+        # Ensure even dimensions for yuv420p compatibility
+        vf_parts.append("pad=ceil(iw/2)*2:ceil(ih/2)*2")
 
         cmd = [
             'ffmpeg', '-y', '-start_number', '0', '-framerate', str(fps),
             '-i', str(tmpdir_path / '%06d.jpg'), '-c:v', 'libx264',
             '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart'
+            '-movflags', '+faststart',
+            '-vf', ','.join(vf_parts)
         ]
-
-        if vf_parts:
-            cmd += ['-vf', ','.join(vf_parts)]
 
         cmd.append(str(output_path))
 
