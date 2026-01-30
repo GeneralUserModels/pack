@@ -25,7 +25,8 @@ class ScreenRecorder:
         monitor: bool = False,
         max_res: tuple[int, int] = None,
         accessibility: bool = False,
-        compression_quality: int = 70
+        compression_quality: int = 70,
+        lossless: bool = False
     ):
         """
         Initialize the screen recorder.
@@ -76,7 +77,7 @@ class ScreenRecorder:
             session_dir=self.session_dir
         )
 
-        self.save_worker = SaveWorker(self.session_dir, buffer_all, compression_quality=compression_quality)
+        self.save_worker = SaveWorker(self.session_dir, buffer_all, compression_quality=compression_quality, lossless=lossless)
 
         self.aggregation_worker = AggregationWorker(
             event_queue=self.input_event_queue,
@@ -311,6 +312,11 @@ def main():
         help="JPEG compression quality for saved screenshots (1-100, default: 70)",
         default=70
     )
+    parser.add_argument(
+        "-l", "--lossless",
+        action="store_true",
+        help="Save screenshots as PNG (lossless) instead of JPEG"
+    )
 
     args = parser.parse_args()
 
@@ -323,7 +329,8 @@ def main():
         monitor=args.monitor,
         max_res=args.max_res,
         accessibility=args.accessibility,
-        compression_quality=args.compression_quality
+        compression_quality=args.compression_quality,
+        lossless=args.lossless
     )
     recorder.run()
 

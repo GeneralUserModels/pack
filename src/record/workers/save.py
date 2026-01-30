@@ -8,12 +8,15 @@ from record.models.event import InputEvent
 class SaveWorker:
     """Worker for saving queue items to disk."""
 
-    def __init__(self, session_dir: Path, buffer_all: bool = False, compression_quality: int = 70):
+    def __init__(self, session_dir: Path, buffer_all: bool = False, compression_quality: int = 70, lossless: bool = False):
         """
         Initialize the save worker.
 
         Args:
             session_dir: Directory for the current session
+            buffer_all: If True, save all buffer images
+            compression_quality: JPEG compression quality (1-100)
+            lossless: If True, save as PNG (lossless) instead of JPEG
         """
         self.session_dir = Path(session_dir)
         self.screenshots_dir = self.session_dir / "screenshots"
@@ -28,6 +31,7 @@ class SaveWorker:
         self.input_log = self.session_dir / "input_events.jsonl"
         self.screenshot_log = self.session_dir / "screenshots.jsonl"
         self.compression_quality = compression_quality
+        self.lossless = lossless
 
     def save_input_event(self, event: InputEvent) -> None:
         """
@@ -57,7 +61,8 @@ class SaveWorker:
         """
         try:
             save_dir = self.buffer_imgs_dir if buffer_dir else self.screenshots_dir
-            filename = f"{image.timestamp:.6f}_reason_{save_reason}.jpg"
+            ext = ".png" if self.lossless else ".jpg"
+            filename = f"{image.timestamp:.6f}_reason_{save_reason}{ext}"
             filepath = save_dir / filename
 
             if force_save or self.buffer_all:
@@ -65,7 +70,11 @@ class SaveWorker:
                     img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
                 except Exception:
                     img_bgr = image.screenshot
-                cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, self.compression_quality])
+                
+                if self.lossless:
+                    cv2.imwrite(str(filepath), img_bgr)
+                else:
+                    cv2.imwrite(str(filepath), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, self.compression_quality])
 
             metadata = {
                 'timestamp': image.timestamp,
