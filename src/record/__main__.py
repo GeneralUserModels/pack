@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 from pynput import mouse, keyboard
 
 from record.models import ImageQueue, AggregationConfig, EventQueue
@@ -13,6 +14,24 @@ from record.handlers import InputEventHandler, ScreenshotHandler
 from record.monitor import RealtimeVisualizer, plot_summary_stats
 from record.constants import constants_manager
 from record.sanitize import sanitize_aggregations
+
+
+def get_screen_dpi() -> Optional[float]:
+    """
+    Detect the screen DPI using screeninfo.
+    Returns the DPI of the primary monitor, or None if unavailable.
+    """
+    try:
+        from screeninfo import get_monitors
+        monitors = list(get_monitors())
+        if monitors:
+            m = monitors[0]
+            if m.width_mm and m.width_mm > 0:
+                dpi = m.width / (m.width_mm / 25.4)
+                return dpi
+    except Exception as e:
+        print(f"Warning: Could not detect screen DPI: {e}")
+    return None
 
 
 class ScreenRecorder:
@@ -24,6 +43,7 @@ class ScreenRecorder:
         buffer_all: bool = False,
         monitor: bool = False,
         max_res: tuple[int, int] = None,
+        scale: float = None,
         accessibility: bool = False,
         compression_quality: int = 70,
         lossless: bool = False
@@ -42,6 +62,7 @@ class ScreenRecorder:
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
         self.max_res = max_res
+        self.scale = scale
         constants = constants_manager.get()
 
         self.image_buffer_size = fps * buffer_seconds
@@ -90,7 +111,8 @@ class ScreenRecorder:
         self.screenshot_manager = ScreenshotHandler(
             image_queue=self.image_queue,
             fps=self.fps,
-            max_res=self.max_res
+            max_res=self.max_res,
+            scale=self.scale
         )
 
         self.input_handler = InputEventHandler(
@@ -317,10 +339,32 @@ def main():
         action="store_true",
         help="Save screenshots as PNG (lossless) instead of JPEG"
     )
+    parser.add_argument(
+        "-d", "--dpi",
+        type=int,
+        default=None,
+        help="Target DPI for screenshots (will scale based on detected screen DPI)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="Scale factor for screenshots (0.0-1.0, overrides --dpi)"
+    )
 
     args = parser.parse_args()
 
     constants_manager.set_preset(args.precision, verbose=False)
+
+    # Calculate scale factor from DPI if provided
+    scale = args.scale
+    if scale is None and args.dpi is not None:
+        screen_dpi = get_screen_dpi()
+        if screen_dpi:
+            scale = args.dpi / screen_dpi
+            print(f"Screen DPI: {screen_dpi:.1f}, Target DPI: {args.dpi}, Scale: {scale:.3f}")
+        else:
+            print(f"Warning: Could not detect screen DPI. --dpi will be ignored.")
 
     recorder = ScreenRecorder(
         fps=args.fps,
@@ -328,6 +372,7 @@ def main():
         buffer_all=args.buffer_all_images,
         monitor=args.monitor,
         max_res=args.max_res,
+        scale=scale,
         accessibility=args.accessibility,
         compression_quality=args.compression_quality,
         lossless=args.lossless

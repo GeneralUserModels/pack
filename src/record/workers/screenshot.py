@@ -52,9 +52,40 @@ def _resize_if_needed(img_rgb: np.ndarray, max_res) -> np.ndarray:
     return np.asarray(pil_resized)
 
 
-def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> Tuple[Optional[np.ndarray], Optional[int], Optional[float], Optional[dict]]:
+def _resize_by_scale(img_rgb: np.ndarray, scale: float) -> np.ndarray:
+    """
+    Resize a HxWx3 uint8 RGB numpy image by a scale factor.
+    Only downscales (scale < 1.0). Returns the (possibly) resized image.
+    """
+    if scale >= 1.0:
+        return img_rgb
+
+    h, w = img_rgb.shape[:2]
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+
+    pil = Image.fromarray(img_rgb)
+    pil_resized = pil.resize((new_w, new_h), Image.LANCZOS)
+    return np.asarray(pil_resized)
+
+
+def capture_screenshot(
+    sct,
+    x: int,
+    y: int,
+    max_res: tuple[int, int] = None,
+    scale: float = None
+) -> Tuple[Optional[np.ndarray], Optional[int], Optional[float], Optional[dict]]:
     """
     Capture a screenshot from sct that contains (x, y).
+    
+    Args:
+        sct: mss screenshot object
+        x: cursor x coordinate
+        y: cursor y coordinate
+        max_res: optional max resolution to fit within (width, height)
+        scale: optional scale factor (0.0-1.0) to resize by
+    
     Returns (img_rgb, monitor_index, timestamp, scale_factor, monitor_dict) or (None, None, None, None, None) on error.
     """
     try:
@@ -75,8 +106,14 @@ def capture_screenshot(sct, x: int, y: int, max_res: tuple[int, int] = None) -> 
         img_rgb = img[:, :, [2, 1, 0]]
 
         scale_factor = 1.0
-        if max_res is not None:
-            h, w = img_rgb.shape[:2]
+        h, w = img_rgb.shape[:2]
+        
+        # Apply scale factor if provided (takes priority over max_res)
+        if scale is not None and scale < 1.0:
+            img_rgb = _resize_by_scale(img_rgb, scale)
+            new_h, new_w = img_rgb.shape[:2]
+            scale_factor = new_w / w
+        elif max_res is not None:
             img_rgb = _resize_if_needed(img_rgb, max_res)
             new_h, new_w = img_rgb.shape[:2]
             scale_factor = new_w / w
