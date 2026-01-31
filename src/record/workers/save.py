@@ -8,7 +8,14 @@ from record.models.event import InputEvent
 class SaveWorker:
     """Worker for saving queue items to disk."""
 
-    def __init__(self, session_dir: Path, buffer_all: bool = False, compression_quality: int = 70, lossless: bool = False):
+    def __init__(
+        self,
+        session_dir: Path,
+        buffer_all: bool = False,
+        compression_quality: int = 70,
+        lossless: bool = False,
+        save_screenshots: bool = True
+    ):
         """
         Initialize the save worker.
 
@@ -17,10 +24,12 @@ class SaveWorker:
             buffer_all: If True, save all buffer images
             compression_quality: JPEG compression quality (1-100)
             lossless: If True, save as PNG (lossless) instead of JPEG
+            save_screenshots: If False, skip writing screenshot files to disk
         """
         self.session_dir = Path(session_dir)
         self.screenshots_dir = self.session_dir / "screenshots"
         self.buffer_all = buffer_all
+        self.save_screenshots = save_screenshots
         if buffer_all:
             self.buffer_imgs_dir = self.session_dir / "buffer_imgs"
             self.buffer_imgs_dir.mkdir(exist_ok=True)
@@ -57,8 +66,12 @@ class SaveWorker:
             force_save: If True, always write the image file regardless of self.buffer_all
 
         Returns:
-            Path to saved image (string)
+            Path to saved image (string), or empty string if save_screenshots is False
         """
+        # Skip saving entirely if save_screenshots is disabled
+        if not self.save_screenshots:
+            return ""
+
         try:
             save_dir = self.buffer_imgs_dir if buffer_dir else self.screenshots_dir
             ext = ".png" if self.lossless else ".jpg"

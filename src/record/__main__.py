@@ -57,7 +57,8 @@ class ScreenRecorder:
         scale: Union[float, dict[int, float]] = None,
         accessibility: bool = False,
         compression_quality: int = 70,
-        lossless: bool = False
+        lossless: bool = False,
+        save_screenshots: bool = True
     ):
         """
         Initialize the screen recorder.
@@ -68,6 +69,7 @@ class ScreenRecorder:
             buffer_all: If True, save all screenshots to disk
             monitor: If True, enable real-time monitoring
             accessibility: If True, enable accessibility info capture
+            save_screenshots: If False, skip writing screenshot files to disk
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
@@ -109,7 +111,13 @@ class ScreenRecorder:
             session_dir=self.session_dir
         )
 
-        self.save_worker = SaveWorker(self.session_dir, buffer_all, compression_quality=compression_quality, lossless=lossless)
+        self.save_worker = SaveWorker(
+            self.session_dir,
+            buffer_all,
+            compression_quality=compression_quality,
+            lossless=lossless,
+            save_screenshots=save_screenshots
+        )
 
         self.aggregation_worker = AggregationWorker(
             event_queue=self.input_event_queue,
