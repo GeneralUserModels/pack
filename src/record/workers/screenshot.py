@@ -1,6 +1,6 @@
 import time
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 from PIL import Image
 
 
@@ -74,7 +74,7 @@ def capture_screenshot(
     x: int,
     y: int,
     max_res: tuple[int, int] = None,
-    scale: float = None
+    scale: Union[float, dict[int, float]] = None
 ) -> Tuple[Optional[np.ndarray], Optional[int], Optional[float], Optional[dict]]:
     """
     Capture a screenshot from sct that contains (x, y).
@@ -84,7 +84,7 @@ def capture_screenshot(
         x: cursor x coordinate
         y: cursor y coordinate
         max_res: optional max resolution to fit within (width, height)
-        scale: optional scale factor (0.0-1.0) to resize by
+        scale: optional scale factor (0.0-1.0) or dict mapping monitor index to scale
     
     Returns (img_rgb, monitor_index, timestamp, scale_factor, monitor_dict) or (None, None, None, None, None) on error.
     """
@@ -108,9 +108,21 @@ def capture_screenshot(
         scale_factor = 1.0
         h, w = img_rgb.shape[:2]
         
+        # Resolve scale for this monitor
+        effective_scale = None
+        if scale is not None:
+            if isinstance(scale, dict):
+                # Per-monitor scale: look up by monitor_index
+                # screeninfo uses 0-based indexing, mss uses 1-based (0 = all monitors)
+                # So mss monitor 1 = screeninfo monitor 0
+                screeninfo_idx = max(0, monitor_index - 1)
+                effective_scale = scale.get(screeninfo_idx)
+            else:
+                effective_scale = scale
+        
         # Apply scale factor if provided (takes priority over max_res)
-        if scale is not None and scale < 1.0:
-            img_rgb = _resize_by_scale(img_rgb, scale)
+        if effective_scale is not None and effective_scale < 1.0:
+            img_rgb = _resize_by_scale(img_rgb, effective_scale)
             new_h, new_w = img_rgb.shape[:2]
             scale_factor = new_w / w
         elif max_res is not None:

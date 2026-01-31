@@ -5,7 +5,7 @@ import sys
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 from pynput import mouse, keyboard
 
 from record.models import ImageQueue, AggregationConfig, EventQueue
@@ -16,22 +16,33 @@ from record.constants import constants_manager
 from record.sanitize import sanitize_aggregations
 
 
-def get_screen_dpi() -> Optional[float]:
+def get_monitor_dpis() -> dict[int, float]:
     """
-    Detect the screen DPI using screeninfo.
-    Returns the DPI of the primary monitor, or None if unavailable.
+    Detect the DPI for each monitor using screeninfo.
+    Returns a dict mapping monitor index to DPI.
     """
+    dpis = {}
     try:
         from screeninfo import get_monitors
         monitors = list(get_monitors())
-        if monitors:
-            m = monitors[0]
+        for i, m in enumerate(monitors):
             if m.width_mm and m.width_mm > 0:
                 dpi = m.width / (m.width_mm / 25.4)
-                return dpi
+                dpis[i] = dpi
     except Exception as e:
         print(f"Warning: Could not detect screen DPI: {e}")
-    return None
+    return dpis
+
+
+def calculate_monitor_scales(target_dpi: int, monitor_dpis: dict[int, float]) -> dict[int, float]:
+    """
+    Calculate scale factors for each monitor based on target DPI.
+    Returns a dict mapping monitor index to scale factor.
+    """
+    scales = {}
+    for monitor_idx, screen_dpi in monitor_dpis.items():
+        scales[monitor_idx] = target_dpi / screen_dpi
+    return scales
 
 
 class ScreenRecorder:
@@ -43,7 +54,7 @@ class ScreenRecorder:
         buffer_all: bool = False,
         monitor: bool = False,
         max_res: tuple[int, int] = None,
-        scale: float = None,
+        scale: Union[float, dict[int, float]] = None,
         accessibility: bool = False,
         compression_quality: int = 70,
         lossless: bool = False
@@ -357,12 +368,14 @@ def main():
     constants_manager.set_preset(args.precision, verbose=False)
 
     # Calculate scale factor from DPI if provided
-    scale = args.scale
+    scale = args.scale  # Can be a single float
     if scale is None and args.dpi is not None:
-        screen_dpi = get_screen_dpi()
-        if screen_dpi:
-            scale = args.dpi / screen_dpi
-            print(f"Screen DPI: {screen_dpi:.1f}, Target DPI: {args.dpi}, Scale: {scale:.3f}")
+        monitor_dpis = get_monitor_dpis()
+        if monitor_dpis:
+            scale = calculate_monitor_scales(args.dpi, monitor_dpis)
+            print(f"Target DPI: {args.dpi}")
+            for idx, dpi in monitor_dpis.items():
+                print(f"  Monitor {idx}: {dpi:.1f} DPI → scale {scale[idx]:.3f}")
         else:
             print(f"Warning: Could not detect screen DPI. --dpi will be ignored.")
 

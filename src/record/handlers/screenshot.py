@@ -1,6 +1,6 @@
 import time
 import threading
-from typing import Optional
+from typing import Optional, Union
 from pynput import mouse
 import mss
 from record.models.event_queue import EventQueue
@@ -17,7 +17,7 @@ class ScreenshotHandler:
         fps: int = 30,
         monitor_index: Optional[int] = None,
         max_res: Optional[tuple[int, int]] = None,
-        scale: Optional[float] = None
+        scale: Optional[Union[float, dict[int, float]]] = None
     ):
         """
         Initialize the screenshot manager.
@@ -27,7 +27,7 @@ class ScreenshotHandler:
             fps: Frames per second to capture
             monitor_index: Specific monitor to capture (None for active monitor)
             max_res: Optional max resolution to fit within
-            scale: Optional scale factor (0.0-1.0) to resize by
+            scale: Optional scale factor (0.0-1.0) or dict of per-monitor scales
         """
         self.image_queue = image_queue
         self.fps = fps
