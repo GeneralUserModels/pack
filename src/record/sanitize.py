@@ -1,5 +1,91 @@
 from pathlib import Path
 import json
+from typing import List, Dict, Any
+
+
+def sanitize_records(records: List[Dict[str, Any]], verbose: bool = False) -> List[Dict[str, Any]]:
+    """
+    Sanitize aggregation records in-memory by redistributing events to correct time windows.
+    
+    Args:
+        records: List of aggregation dicts with 'screenshot_timestamp', 'events', etc.
+        verbose: Whether to print debug info.
+        
+    Returns:
+        List of sanitized aggregation dicts with events properly assigned.
+    """
+    if not records:
+        return []
+    
+    # Filter out records without screenshot_timestamp or screenshot_path
+    valid_records = []
+    for record in records:
+        if (record.get('screenshot_timestamp') is not None and
+                record.get('screenshot_path') is not None):
+            valid_records.append(record)
+        elif verbose:
+            print(f"Skipping record with missing screenshot info: reason={record.get('reason')}")
+    
+    if not valid_records:
+        return []
+    
+    # Sort by screenshot_timestamp
+    valid_records.sort(key=lambda x: x['screenshot_timestamp'])
+    
+    # Collect ALL events from ALL records (including invalid ones)
+    all_events = []
+    for record in records:
+        if 'events' in record and record['events']:
+            all_events.extend(record['events'])
+    
+    if verbose:
+        print(f"Total events collected: {len(all_events)}")
+    
+    # Sort all events by timestamp
+    all_events.sort(key=lambda x: x.get('timestamp', 0))
+    
+    # Create timestamp pairs
+    timestamp_pairs = []
+    for i, record in enumerate(valid_records):
+        start_timestamp = record['screenshot_timestamp']
+        
+        # Determine end timestamp
+        if i < len(valid_records) - 1:
+            end_timestamp = valid_records[i + 1]['screenshot_timestamp']
+        else:
+            # For last record, use its end_screenshot_timestamp or last event timestamp
+            end_timestamp = record.get('end_screenshot_timestamp')
+            if end_timestamp is None and all_events:
+                end_timestamp = all_events[-1].get('timestamp', start_timestamp) + 1
+        
+        timestamp_pairs.append({
+            'record': record,
+            'start': start_timestamp,
+            'end': end_timestamp,
+            'index': i
+        })
+    
+    # Redistribute events to correct pairs
+    sanitized_records = []
+    
+    for pair in timestamp_pairs:
+        matching_events = []
+        
+        for event in all_events:
+            event_timestamp = event.get('timestamp')
+            if event_timestamp is None:
+                continue
+            if pair['start'] < event_timestamp <= pair['end']:
+                matching_events.append(event)
+        
+        # Create sanitized record
+        sanitized_record = pair['record'].copy()
+        sanitized_record['end_screenshot_timestamp'] = pair['end']
+        sanitized_record['events'] = matching_events
+        sanitized_record['num_events'] = len(matching_events)
+        sanitized_records.append(sanitized_record)
+    
+    return sanitized_records
 
 
 def sanitize_aggregations(input_file: Path):
