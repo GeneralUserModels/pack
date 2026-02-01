@@ -5,7 +5,7 @@ import sys
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Union, List
 from pynput import mouse, keyboard
 
 from record.models import ImageQueue, AggregationConfig, EventQueue
@@ -58,7 +58,8 @@ class ScreenRecorder:
         accessibility: bool = False,
         compression_quality: int = 70,
         lossless: bool = False,
-        save_screenshots: bool = True
+        save_screenshots: bool = True,
+        disable: Optional[List[str]] = None
     ):
         """
         Initialize the screen recorder.
@@ -70,12 +71,15 @@ class ScreenRecorder:
             monitor: If True, enable real-time monitoring
             accessibility: If True, enable accessibility info capture
             save_screenshots: If False, skip writing screenshot files to disk
+            disable: List of event types to disable recording for.
+                     Valid values: "move", "scroll", "click", "key"
         """
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer_all = buffer_all
         self.max_res = max_res
         self.scale = scale
+        self.disable = disable or []
         constants = constants_manager.get()
 
         self.image_buffer_size = fps * buffer_seconds
@@ -136,7 +140,8 @@ class ScreenRecorder:
 
         self.input_handler = InputEventHandler(
             self.input_event_queue,
-            accessibility=accessibility
+            accessibility=accessibility,
+            disable=self.disable
         )
         self.mouse_listener = None
         self.keyboard_listener = None
@@ -370,6 +375,14 @@ def main():
         default=None,
         help="Scale factor for screenshots (0.0-1.0, overrides --dpi)"
     )
+    parser.add_argument(
+        "--disable",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Event types to disable: move, scroll, click, key. "
+             "Example: --disable move scroll"
+    )
 
     args = parser.parse_args()
 
@@ -396,7 +409,8 @@ def main():
         scale=scale,
         accessibility=args.accessibility,
         compression_quality=args.compression_quality,
-        lossless=args.lossless
+        lossless=args.lossless,
+        disable=args.disable
     )
     recorder.run()
 

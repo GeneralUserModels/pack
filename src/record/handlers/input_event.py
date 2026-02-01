@@ -1,18 +1,52 @@
 import time
+from typing import List, Optional
 from pynput import mouse
 from screeninfo import get_monitors
 from record.models.event import InputEvent, EventType
 from record.models.event_queue import EventQueue
 
 
+# Valid event types that can be disabled
+DISABLEABLE_EVENTS = {"move", "scroll", "click", "key"}
+
+
 class InputEventHandler:
     """Handler for capturing and recording input events."""
 
-    def __init__(self, event_queue: EventQueue, accessibility: bool = False):
+    def __init__(
+        self,
+        event_queue: EventQueue,
+        accessibility: bool = False,
+        disable: Optional[List[str]] = None
+    ):
+        """
+        Initialize the input event handler.
+
+        Args:
+            event_queue: EventQueue instance to enqueue events
+            accessibility: If True, enable accessibility info capture
+            disable: List of event types to disable. Valid values:
+                     "move" - disable mouse move events
+                     "scroll" - disable mouse scroll events
+                     "click" - disable mouse click events
+                     "key" - disable keyboard events
+        """
         self.event_queue = event_queue
         self._monitors = list(get_monitors())
         self.accessibility_enabled = accessibility
         self.accessibility_handler = None
+        
+        # Parse disabled event types
+        self._disabled = set()
+        if disable:
+            for event_type in disable:
+                if event_type not in DISABLEABLE_EVENTS:
+                    print(f"Warning: Unknown event type '{event_type}' in disable list. "
+                          f"Valid types: {DISABLEABLE_EVENTS}")
+                else:
+                    self._disabled.add(event_type)
+            if self._disabled:
+                print(f"Input events disabled: {self._disabled}")
 
         if self.accessibility_enabled:
             try:
@@ -53,6 +87,9 @@ class InputEventHandler:
             x: X coordinate
             y: Y coordinate
         """
+        if "move" in self._disabled:
+            return
+            
         timestamp = time.time()
         monitor_idx, monitor = self._get_monitor(x, y)
 
@@ -82,6 +119,9 @@ class InputEventHandler:
             button: Mouse button
             pressed: True if pressed, False if released
         """
+        if "click" in self._disabled:
+            return
+            
         timestamp = time.time()
         monitor_idx, monitor = self._get_monitor(x, y)
 
@@ -115,6 +155,9 @@ class InputEventHandler:
             dx: Horizontal scroll amount
             dy: Vertical scroll amount
         """
+        if "scroll" in self._disabled:
+            return
+            
         timestamp = time.time()
         monitor_idx, monitor = self._get_monitor(x, y)
 
@@ -146,6 +189,9 @@ class InputEventHandler:
         Args:
             key: Key that was pressed
         """
+        if "key" in self._disabled:
+            return
+            
         timestamp = time.time()
         x, y = None, None
 
@@ -181,6 +227,9 @@ class InputEventHandler:
         Args:
             key: Key that was released
         """
+        if "key" in self._disabled:
+            return
+            
         timestamp = time.time()
         x, y = None, None
 
