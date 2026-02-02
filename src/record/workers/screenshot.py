@@ -130,7 +130,7 @@ def capture_screenshot(
             new_h, new_w = img_rgb.shape[:2]
             scale_factor = new_w / w
 
-        return img_rgb, monitor_index, time_before, scale_factor, monitor
+        return img_rgb, max(0, monitor_index - 1), time_before, scale_factor, monitor
     except Exception as e:
         print(f"Error capturing screenshot: {e}")
         return None, None, None, None, None
