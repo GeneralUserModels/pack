@@ -46,7 +46,7 @@ Here are the user input events:
 
    - Do not mention coordinates, cursor paths, or raw keycodes.
 
-6. **Favor Screenshot over input events**
+6. **Favor screenshot over input events**
 
    - In cases where input logs and screenshots conflict, or logs are harder to understand, prioritize the **visual evidence** from screenshots.
 
