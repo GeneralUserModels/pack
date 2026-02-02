@@ -80,9 +80,9 @@ class SaveWorker:
 
             if force_save or self.buffer_all:
                 try:
-                    img_bgr = cv2.cvtColor(image.screenshot, cv2.COLOR_RGB2BGR)
+                    img_bgr = cv2.cvtColor(image.data, cv2.COLOR_RGB2BGR)
                 except Exception:
-                    img_bgr = image.screenshot
+                    img_bgr = image.data
                 
                 if self.lossless:
                     cv2.imwrite(str(filepath), img_bgr)

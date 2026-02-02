@@ -53,7 +53,7 @@ class ScreenshotHandler:
                     if screenshot is not None:
                         buffer_image = BufferImage(
                             timestamp=timestamp,
-                            screenshot=screenshot,
+                            data=screenshot,
                             monitor_index=monitor_index,
                             scale_factor=scale_factor,
                             monitor_dict=monitor_dict

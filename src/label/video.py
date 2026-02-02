@@ -270,7 +270,7 @@ def create_video(
             # Use aggregations to get image paths
             for idx, agg in enumerate(aggregations):
                 src = Path(agg.screenshot_path)
-                dst = tmpdir_path / f"{idx:06d}.jpg"
+                dst = tmpdir_path / f"{idx:06d}.png"
 
                 if annotate:
                     agg = apply_pending_movement(agg, pending_movement)
@@ -295,7 +295,7 @@ def create_video(
             # Use image_paths directly (screenshots-only mode)
             for idx, img_path in enumerate(image_paths):
                 src = Path(img_path)
-                dst = tmpdir_path / f"{idx:06d}.jpg"
+                dst = tmpdir_path / f"{idx:06d}.png"
                 shutil.copy2(src, dst)
 
         vf_parts = []
@@ -308,7 +308,7 @@ def create_video(
 
         cmd = [
             'ffmpeg', '-y', '-start_number', '0', '-framerate', str(fps),
-            '-i', str(tmpdir_path / '%06d.jpg'), '-c:v', 'libx264',
+            '-i', str(tmpdir_path / '%06d.png'), '-c:v', 'libx264',
             '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
             '-vf', ','.join(vf_parts)
