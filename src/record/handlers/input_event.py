@@ -33,6 +33,8 @@ class InputEventHandler:
         """
         self.event_queue = event_queue
         self._monitors = list(get_monitors())
+        self._monitors_last_refresh = time.time()
+        self._monitors_refresh_interval = 5.0
         self.accessibility_enabled = accessibility
         self.accessibility_handler = None
         
@@ -68,6 +70,14 @@ class InputEventHandler:
         Returns:
             Monitor index (0-based)
         """
+        now = time.time()
+        if now - self._monitors_last_refresh > self._monitors_refresh_interval:
+            try:
+                self._monitors = list(get_monitors())
+            except Exception:
+                pass
+            self._monitors_last_refresh = now
+
         def to_monitor_dict(monitor):
             return {
                 "left": monitor.x, "top": monitor.y, "width": monitor.width, "height": monitor.height
