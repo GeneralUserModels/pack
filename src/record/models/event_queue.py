@@ -96,7 +96,7 @@ class EventQueue:
 
             queue = self.aggregations[agg_type]
             config = self.configs[agg_type]
-            screenshots = self._collect_screenshots(event.timestamp)
+            screenshots = self._collect_screenshots(event.timestamp, event.monitor_index)
 
             last_event, last_screenshots = queue[-1] if queue else (None, None)
             first_event, first_screenshots = queue[0] if queue else (None, None)
@@ -171,7 +171,7 @@ class EventQueue:
         current_burst_id = self._get_burst_id_for_type(agg_type)
 
         # Get screenshot with padding after
-        end_screenshot = self._collect_end_screenshot(event.timestamp)
+        end_screenshot = self._collect_end_screenshot(event.timestamp, event.monitor_index)
 
         request = self._create_request(
             event=event,
@@ -255,21 +255,33 @@ class EventQueue:
             self.next_burst_id
         )
 
-    def _collect_screenshots(self, timestamp: float) -> Any:
-        """Get screenshot before timestamp."""
+    def _collect_screenshots(self, timestamp: float, monitor_index: int = None) -> Any:
+        """Get screenshot before timestamp, preferring the given monitor."""
         constants = constants_manager.get()
         start_candidates = self.image_queue.get_entries_before(
             timestamp, milliseconds=constants.PADDING_BEFORE
         )
-        return start_candidates[-1] if start_candidates else None
+        if not start_candidates:
+            return None
+        if monitor_index is not None:
+            matching = [s for s in start_candidates if s.monitor_index == monitor_index]
+            if matching:
+                return matching[-1]
+        return start_candidates[-1]
 
-    def _collect_end_screenshot(self, timestamp: float) -> Any:
-        """Get screenshot after timestamp with padding."""
+    def _collect_end_screenshot(self, timestamp: float, monitor_index: int = None) -> Any:
+        """Get screenshot after timestamp with padding, preferring the given monitor."""
         constants = constants_manager.get()
         exact_candidates = self.image_queue.get_entries_after(
             timestamp, milliseconds=constants.PADDING_AFTER
         )
-        return exact_candidates[-1] if exact_candidates else None
+        if not exact_candidates:
+            return None
+        if monitor_index is not None:
+            matching = [s for s in exact_candidates if s.monitor_index == monitor_index]
+            if matching:
+                return matching[-1]
+        return exact_candidates[-1]
 
     def _save_event_to_jsonl(self, event: InputEvent) -> None:
         if self.session_dir:
