@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 import sys
 import ctypes
+import ctypes.wintypes
 
 try:
     import comtypes
@@ -75,7 +76,7 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
                 self.UIAutomationClient.CUIAutomation,
                 interface=self.UIAutomationClient.IUIAutomation
             )
-        except:
+        except Exception:
             self._automation = None
 
     def __call__(self, input_event: InputEvent) -> Dict[str, Any]:
@@ -85,7 +86,7 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
                 return super().__call__(input_event)
             finally:
                 ctypes.windll.ole32.CoUninitialize()
-        except:
+        except Exception:
             return {}
 
     def _get_element_at_position(self, x: int, y: int) -> Optional[Any]:
@@ -98,7 +99,7 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
             point = ctypes.wintypes.POINT(x, y)
             element = self._automation.ElementFromPoint(point)
             return element
-        except:
+        except Exception:
             return None
     
     def _get_focused_element(self) -> Optional[Any]:
@@ -110,7 +111,7 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
         try:
             element = self._automation.GetFocusedElement()
             return element
-        except:
+        except Exception:
             return None
     
     def _extract_element_info(self, element) -> Optional[Dict[str, Any]]:
@@ -129,7 +130,7 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
                     if attr == 'ControlType':
                         value = self._get_control_type_name(value)
                     info[attr] = self._clean_value(value)
-            except:
+            except Exception:
                 pass
         
         # Extract role-specific attributes
@@ -144,9 +145,9 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
                             value = element.GetCurrentPropertyValue(prop_id)
                             if value is not None:
                                 info[attr] = self._clean_value(value)
-                        except:
+                        except Exception:
                             pass
-        except:
+        except Exception:
             pass
 
         # Extract parent info
@@ -162,11 +163,11 @@ class AccessibilityHandlerWindows(AccessibilityHandlerBase):
                         parent_info['ControlType'] = parent_role
                     if parent_name:
                         parent_info['Name'] = parent_name
-                except:
+                except Exception:
                     pass
                 if parent_info:
                     info['_parent'] = parent_info
-        except:
+        except Exception:
             pass
         
         return info if info else None

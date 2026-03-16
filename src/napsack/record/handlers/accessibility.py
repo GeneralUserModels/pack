@@ -141,4 +141,4 @@ if sys.platform == 'darwin':
 elif sys.platform == 'win32':
     from ._accessibility_windows import AccessibilityHandlerWindows as AccessibilityHandler
 else:
-    from ._accessibility_windows import AccessibilityHandlerWindows as AccessibilityHandler
+    raise OSError(f"Unsupported platform for accessibility handler: {sys.platform}")
