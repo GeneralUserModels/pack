@@ -13,6 +13,7 @@ The dense caption should be a concise but information-rich summary optimized for
 - "Chrome browser on GitHub pull request #347 'Fix race condition in connection pool' in repo acme/backend. Files changed: pool.py (+23 -8), test_pool.py (+45). Review comment from @danl: 'Should we add a timeout here?' on line 89 of pool.py."
 - "Terminal running `kubectl get pods -n staging`. Output shows 4 pods: api-server-7f8b (Running), worker-3a2c (CrashLoopBackOff), redis-cache-1d4e (Running), nginx-proxy-9b1f (Running). Error on worker pod: OOMKilled, restarts: 12."
 - "Google Sheets spreadsheet 'Q2 Marketing Budget'. Editing cell D14 with formula `=SUM(D2:D13)`. Column D header: 'Spend ($)'. Visible values: D2=1200, D3=3400, D5=890. Sheet tab: 'Paid Ads'."
+- "Slack conversation in #eng-incidents channel. User typed: 'looks like the redis cluster in us-east-1 is throwing CLUSTERDOWN errors — can someone check if the failover completed? cc @oncall-infra'. Replying to message from @mkhan: 'We're seeing elevated 5xx rates on the payments service since 2:14pm PT.' Channel topic: 'Production incident triage'."
 
 ## Output
 
