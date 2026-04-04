@@ -1,0 +1,13 @@
+## Output
+
+A JSON array of objects. Use **frame numbers** (integers) for start and end:
+
+```json
+[
+  {
+    "start": 1,
+    "end":   3,
+    "caption": "..."
+  }
+]
+```

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "napsack"
-version = "0.1.1"
+version = "0.1.2"
 readme = "README.md"
 description = "NAPsack records and aggregates your computer use — screenshots plus input events (click, keypress, scroll, cursor move). It groups activity into event bursts and uses a VLM pipeline to generate human-readable captions describing what happened."
 requires-python = ">=3.11,<=3.13"

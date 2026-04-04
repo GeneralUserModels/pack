@@ -1,4 +1,4 @@
-from napsack.label.clients.client import VLMClient, CAPTION_SCHEMA, IMAGE_CAPTION_SCHEMA
+from napsack.label.clients.client import VLMClient, CAPTION_SCHEMA, IMAGE_CAPTION_SCHEMA, DENSE_CAPTION_SCHEMA, DENSE_IMAGE_CAPTION_SCHEMA
 from napsack.label.clients.litellm import LiteLLMClient
 from napsack.label.clients.bigquery import BigQueryClient, BigQueryResponse
 from napsack.label.clients.tinfoil import TinfoilClient
@@ -23,5 +23,7 @@ __all__ = [
     "TinfoilClient",
     "CAPTION_SCHEMA",
     "IMAGE_CAPTION_SCHEMA",
+    "DENSE_CAPTION_SCHEMA",
+    "DENSE_IMAGE_CAPTION_SCHEMA",
     "create_client",
 ]

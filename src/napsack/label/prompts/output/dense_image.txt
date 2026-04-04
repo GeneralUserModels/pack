@@ -1,0 +1,32 @@
+## Dense Caption
+
+In addition to the actions array, you MUST also produce a `dense_caption` field: a single string that captures the **important text content the user was focused on or interacting with** during this chunk. This includes:
+- Text being read, written, or edited
+- URLs, file paths, code snippets, search queries
+- Names, labels, or data values visible and relevant to the user's activity
+
+The dense caption should be a concise but information-rich summary optimized for text search and retrieval. Do NOT describe actions — instead, capture the **textual content** itself.
+
+### Examples
+
+- "VS Code editor open to src/utils/auth.py. Function `verify_jwt_token(token: str, secret: str) -> dict` on lines 42-58. Import statements: `from jose import jwt`, `from datetime import datetime, timedelta`. Error highlighted on line 51: `jwt.ExpiredSignatureError`."
+- "Chrome browser on GitHub pull request #347 'Fix race condition in connection pool' in repo acme/backend. Files changed: pool.py (+23 -8), test_pool.py (+45). Review comment from @danl: 'Should we add a timeout here?' on line 89 of pool.py."
+- "Terminal running `kubectl get pods -n staging`. Output shows 4 pods: api-server-7f8b (Running), worker-3a2c (CrashLoopBackOff), redis-cache-1d4e (Running), nginx-proxy-9b1f (Running). Error on worker pod: OOMKilled, restarts: 12."
+- "Google Sheets spreadsheet 'Q2 Marketing Budget'. Editing cell D14 with formula `=SUM(D2:D13)`. Column D header: 'Spend ($)'. Visible values: D2=1200, D3=3400, D5=890. Sheet tab: 'Paid Ads'."
+
+## Output
+
+Return a JSON object with two fields. Use **frame numbers** (integers) for start and end:
+
+```json
+{
+  "actions": [
+    {
+      "start": 1,
+      "end":   3,
+      "caption": "..."
+    }
+  ],
+  "dense_caption": "A single string capturing important text content..."
+}
+```

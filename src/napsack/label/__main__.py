@@ -28,6 +28,7 @@ def parse_args():
     p.add_argument("--dedupe-threshold", type=int, default=1, help="Hamming distance threshold for deduplication (drop if <= threshold, default: 1)")
     p.add_argument("--annotate", action="store_true", help="Annotate videos with cursor positions and clicks (only for standard processing)")
     p.add_argument("--image-mode", action="store_true", help="Send frames as individual images instead of video (for models that don't support video input)")
+    p.add_argument("--dense-caption", action="store_true", help="Include a dense text caption per chunk describing important text the user focused on, for retrieval")
     p.add_argument("--skip-existing", action="store_true", help="Skip sessions that have already been processed")
     p.add_argument("--visualize", action="store_true", help="Create annotated video visualizations after processing")
     p.add_argument("--encode-only", action="store_true", help="Only encode videos (create chunks), skip labeling. Useful for pre-processing before running the full pipeline.")
@@ -121,6 +122,7 @@ def process_with_litellm(args, configs):
         hash_cache_path=args.hash_cache,
         dedupe_threshold=args.dedupe_threshold,
         image_mode=args.image_mode,
+        dense_caption=args.dense_caption,
     )
 
     return processor.process_sessions(
@@ -151,6 +153,7 @@ def process_with_bigquery(args, configs):
         hash_cache_path=args.hash_cache,
         dedupe_threshold=args.dedupe_threshold,
         image_mode=args.image_mode,
+        dense_caption=args.dense_caption,
     )
 
     return processor.process_sessions(
@@ -179,6 +182,7 @@ def process_with_tinfoil(args, configs):
         hash_cache_path=args.hash_cache,
         dedupe_threshold=args.dedupe_threshold,
         image_mode=args.image_mode,
+        dense_caption=args.dense_caption,
     )
 
     return processor.process_sessions(

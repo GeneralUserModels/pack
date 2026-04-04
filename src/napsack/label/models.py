@@ -366,6 +366,7 @@ class Caption:
     end_seconds: float
     text: str
     chunk_index: int = 0
+    dense_caption: Optional[str] = None
 
     @property
     def start_formatted(self) -> str:
@@ -381,11 +382,12 @@ class Caption:
             start_seconds=data['start_seconds'],
             end_seconds=data['end_seconds'],
             text=data['caption'],
-            chunk_index=data.get('chunk_index', 0)
+            chunk_index=data.get('chunk_index', 0),
+            dense_caption=data.get('dense_caption'),
         )
 
     def to_dict(self) -> Dict:
-        return {
+        d = {
             'start': self.start_formatted,
             'end': self.end_formatted,
             'start_seconds': self.start_seconds,
@@ -393,6 +395,9 @@ class Caption:
             'caption': self.text,
             'chunk_index': self.chunk_index
         }
+        if self.dense_caption is not None:
+            d['dense_caption'] = self.dense_caption
+        return d
 
 
 @dataclass
@@ -417,7 +422,7 @@ class MatchedCaption:
         return events
 
     def to_dict(self) -> Dict:
-        return {
+        d = {
             'start_time': self.aggregations[0].timestamp if self.aggregations else 0,
             'end_time': self.aggregations[-1].timestamp if self.aggregations else 0,
             'start_index': self.start_index,
@@ -430,6 +435,9 @@ class MatchedCaption:
             'end_formatted': self.caption.end_formatted,
             'scale_factor': self.screenshot_scale_factor
         }
+        if self.caption.dense_caption is not None:
+            d['dense_caption'] = self.caption.dense_caption
+        return d
 
 
 @dataclass

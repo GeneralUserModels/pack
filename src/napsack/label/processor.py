@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from napsack.label.models import SessionConfig, ChunkTask, Caption, Aggregation, VideoPath, MatchedCaption
 from napsack.label.video import create_video, split_video, compute_max_size
-from napsack.label.clients import VLMClient, CAPTION_SCHEMA, IMAGE_CAPTION_SCHEMA
+from napsack.label.clients import VLMClient, CAPTION_SCHEMA, IMAGE_CAPTION_SCHEMA, DENSE_CAPTION_SCHEMA, DENSE_IMAGE_CAPTION_SCHEMA
 
 
 # ============================================================================
@@ -144,22 +144,34 @@ class Processor:
         hash_cache_path: Optional[str] = None,
         dedupe_threshold: int = 1,
         image_mode: bool = False,
+        dense_caption: bool = False,
     ):
         self.client = client
         self.encode_workers = encode_workers
         self.label_workers = label_workers
         self.screenshots_only = screenshots_only
-        self.prompt = self._load_prompt(prompt_file)
         self.max_time_gap = max_time_gap
         self.dedupe_threshold = dedupe_threshold
         self.hash_map = load_hash_cache(hash_cache_path) if hash_cache_path else None
         self.image_mode = image_mode
+        self.dense_caption = dense_caption
+
+        base_prompt = self._load_prompt(prompt_file)
+        output_format = self._load_output_format(image_mode, dense_caption)
+        self.prompt = base_prompt.replace("{{OUTPUT_FORMAT}}", output_format)
 
     def _load_prompt(self, path: str) -> str:
         p = Path(path)
         if not p.exists():
             p = Path(__file__).parent / path
         return p.read_text()
+
+    def _load_output_format(self, image_mode: bool, dense_caption: bool) -> str:
+        if dense_caption:
+            filename = "prompts/output/dense_image.txt" if image_mode else "prompts/output/dense.txt"
+        else:
+            filename = "prompts/output/standard_image.txt" if image_mode else "prompts/output/standard.txt"
+        return self._load_prompt(filename)
 
     def process_sessions(
         self,
@@ -535,6 +547,7 @@ class Processor:
     def _process_single_task(self, task: ChunkTask) -> any:
         """Process single task with schema."""
         if self.image_mode:
+            schema = DENSE_IMAGE_CAPTION_SCHEMA if self.dense_caption else IMAGE_CAPTION_SCHEMA
             per_frame_text = None
             if task.aggregations:
                 per_frame_text = [agg.to_prompt(f"Frame {j + 1}") for j, agg in enumerate(task.aggregations)]
@@ -542,10 +555,11 @@ class Processor:
                 [str(p) for p in task.image_paths], session_id=task.session_id,
                 per_frame_text=per_frame_text,
             )
-            response = self.client.generate(task.prompt, file_desc, schema=IMAGE_CAPTION_SCHEMA)
+            response = self.client.generate(task.prompt, file_desc, schema=schema)
         else:
+            schema = DENSE_CAPTION_SCHEMA if self.dense_caption else CAPTION_SCHEMA
             file_desc = self.client.upload_file(str(task.video_path.resolve()), session_id=task.session_id)
-            response = self.client.generate(task.prompt, file_desc, schema=CAPTION_SCHEMA)
+            response = self.client.generate(task.prompt, file_desc, schema=schema)
 
         return response
 
@@ -597,6 +611,12 @@ class Processor:
 
     def _extract_captions(self, result: any, task: ChunkTask, fps: int = 1) -> List[Caption]:
         captions = []
+        dense_caption_text = None
+
+        # Unwrap dense caption response format
+        if isinstance(result, dict) and "actions" in result:
+            dense_caption_text = result.get("dense_caption") if self.dense_caption else None
+            result = result.get("actions", [])
 
         if isinstance(result, str) or not isinstance(result, list):
             return captions
@@ -636,7 +656,8 @@ class Processor:
                 start_seconds=abs_start,
                 end_seconds=abs_end,
                 text=item.get("caption", item.get("description", "")),
-                chunk_index=task.chunk_index
+                chunk_index=task.chunk_index,
+                dense_caption=dense_caption_text,
             ))
 
         return captions

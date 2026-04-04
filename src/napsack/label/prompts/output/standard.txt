@@ -1,0 +1,13 @@
+## Output
+
+A JSON array of objects:
+
+```json
+[
+  {
+    "start": "MM:SS",
+    "end":   "MM:SS",
+    "caption": "..."
+  }
+]
+```

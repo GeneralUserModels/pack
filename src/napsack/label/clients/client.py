@@ -28,6 +28,23 @@ IMAGE_CAPTION_SCHEMA = {
     }
 }
 
+DENSE_CAPTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "actions": CAPTION_SCHEMA,
+        "dense_caption": {"type": "string"}
+    },
+    "required": ["actions", "dense_caption"]
+}
+
+DENSE_IMAGE_CAPTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "actions": IMAGE_CAPTION_SCHEMA,
+        "dense_caption": {"type": "string"}
+    },
+    "required": ["actions", "dense_caption"]
+}
 
 class VLMClient(ABC):
     @abstractmethod

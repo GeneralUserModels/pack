@@ -72,16 +72,4 @@ Generated captions must be in past tense, and at the level of detail as the exam
 
 You MUST quote specific things from the screen so it's easy to reproduce your steps.
 
-## Output
-
-A JSON array of objects:
-
-```json
-[
-  {
-    "start": "MM:SS",
-    "end":   "MM:SS",
-    "caption": "..."
-  }
-]
-```
+{{OUTPUT_FORMAT}}
