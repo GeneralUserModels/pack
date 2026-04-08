@@ -252,8 +252,12 @@ class ScreenRecorder:
             return
 
         # Ignore further Ctrl+C so sanitization can't be interrupted mid-write
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        except ValueError:
+            # On Windows, this throws if called from a non-main thread
+            pass
 
         print("-------------------------------------------------------------------")
         print(">>>>                    Stopping Recorder                      <<<<")
@@ -307,8 +311,12 @@ class ScreenRecorder:
             self.stop()
             sys.exit(0)
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        try:
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+        except ValueError:
+            # On Windows, this throws if called from a non-main thread
+            pass
 
         self.start()
 
@@ -320,6 +328,14 @@ class ScreenRecorder:
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            PROCESS_PER_MONITOR_DPI_AWARE_V2 = 2
+            ctypes.windll.shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE_V2)
+        except (OSError, AttributeError):
+            pass
+
     parser = argparse.ArgumentParser(
         description="Record screen activity with input events"
     )

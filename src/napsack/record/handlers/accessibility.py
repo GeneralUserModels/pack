@@ -1,40 +1,16 @@
-from typing import Optional, Dict, Any
-from ApplicationServices import (
-    AXUIElementCreateSystemWide,
-    AXUIElementCopyElementAtPosition,
-    AXUIElementCopyAttributeValue,
-)
+import sys
+from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any, List, Set
 from napsack.record.models.event import InputEvent, EventType
 
 
-class AccessibilityHandler:
-    
-    UNIVERSAL_ATTRS = [
-        'AXRole',
-        'AXRoleDescription',
-        'AXTitle',
-        'AXDescription',
-        'AXIdentifier',
-        'AXDOMIdentifier',
-        'AXEnabled',
-        'AXFocused',
-    ]
-    
-    ROLE_SPECIFIC = {
-        'AXButton': ['AXTitle', 'AXDescription'],
-        'AXCheckBox': ['AXTitle', 'AXValue'],
-        'AXRadioButton': ['AXTitle', 'AXValue'],
-        'AXTextField': ['AXTitle', 'AXValue', 'AXPlaceholderValue'],
-        'AXTextArea': ['AXTitle', 'AXValue', 'AXSelectedText'],
-        'AXStaticText': ['AXValue'],
-        'AXLink': ['AXTitle', 'AXURL', 'AXVisited'],
-        'AXImage': ['AXTitle', 'AXDescription', 'AXURL'],
-        'AXMenuItem': ['AXTitle', 'AXEnabled'],
-        'AXPopUpButton': ['AXTitle', 'AXValue'],
-        'AXComboBox': ['AXTitle', 'AXValue'],
-        'AXSlider': ['AXTitle', 'AXValue', 'AXMinValue', 'AXMaxValue'],
-        'AXTab': ['AXTitle', 'AXValue'],
-    }
+class AccessibilityHandlerBase(ABC):
+    ROLE_KEY: str = "Role"
+    UNIVERSAL_ATTRS: List[str] = []
+    ROLE_SPECIFIC: Dict[str, List[str]] = {}
+    USEFUL_FIELDS: List[str] = []
+    GENERIC_ROLES: Set[str] = set()
+    INTERACTIVE_ROLES: Set[str] = set()
     
     def __init__(self):
         self._move_counter = 0
@@ -102,105 +78,38 @@ class AccessibilityHandler:
     def _handle_key_release(self, input_event: InputEvent) -> Dict[str, Any]:
         return {}
     
+    @abstractmethod
     def _get_element_at_position(self, x: int, y: int) -> Optional[Any]:
-        try:
-            system_wide = AXUIElementCreateSystemWide()
-            error_code, element = AXUIElementCopyElementAtPosition(system_wide, x, y, None)
-            
-            if error_code == 0 and element:
-                return element
-            return None
-        except:
-            return None
+        pass
     
+    @abstractmethod
     def _get_focused_element(self) -> Optional[Any]:
-        try:
-            system_wide = AXUIElementCreateSystemWide()
-            error_code, element = AXUIElementCopyAttributeValue(
-                system_wide, 'AXFocusedUIElement', None
-            )
-            
-            if error_code == 0 and element:
-                return element
-            return None
-        except:
-            return None
+        pass
     
+    @abstractmethod
     def _extract_element_info(self, element) -> Optional[Dict[str, Any]]:
-        if not element:
-            return None
-        
-        info = {}
-        
-        for attr in self.UNIVERSAL_ATTRS:
-            try:
-                error_code, value = AXUIElementCopyAttributeValue(element, attr, None)
-                if error_code == 0 and value:
-                    info[attr] = self._clean_value(value)
-            except:
-                pass
-        
-        role = info.get('AXRole')
-        if role and role in self.ROLE_SPECIFIC:
-            for attr in self.ROLE_SPECIFIC[role]:
-                if attr not in info:
-                    try:
-                        error_code, value = AXUIElementCopyAttributeValue(element, attr, None)
-                        if error_code == 0 and value:
-                            info[attr] = self._clean_value(value)
-                    except:
-                        pass
-        
-        try:
-            error_code, parent = AXUIElementCopyAttributeValue(element, 'AXParent', None)
-            if error_code == 0 and parent:
-                parent_info = {}
-                for attr in ['AXRole', 'AXTitle']:
-                    try:
-                        error_code, value = AXUIElementCopyAttributeValue(parent, attr, None)
-                        if error_code == 0 and value:
-                            parent_info[attr] = self._clean_value(value)
-                    except:
-                        pass
-                if parent_info:
-                    info['_parent'] = parent_info
-        except:
-            pass
-        
-        return info if info else None
-    
+        pass
     
     def _has_useful_info(self, ax_data: Dict[str, Any]) -> bool:
         if not ax_data:
             return False
         
-        useful_fields = ['AXTitle', 'AXDescription', 'AXValue', 
-                        'AXPlaceholderValue', 'AXURL', 'AXLabel']
-        
-        for field in useful_fields:
+        for field in self.USEFUL_FIELDS:
             value = ax_data.get(field)
             if value and str(value).strip():
                 return True
         
-        generic_roles = {'AXImage', 'AXGroup', 'AXStaticText', 
-                        'AXScrollArea', 'AXUnknown', 'AXCell'}
+        role = ax_data.get(self.ROLE_KEY, '')
         
-        role = ax_data.get('AXRole', '')
-        
-        if role in generic_roles:
+        if role in self.GENERIC_ROLES:
             return False
         
-        interactive_roles = {'AXButton', 'AXTextField', 'AXTextArea', 
-                            'AXCheckBox', 'AXRadioButton', 'AXLink',
-                            'AXMenuItem', 'AXPopUpButton', 'AXComboBox', 'AXTab',
-                            'AXSlider'}
-        
-        if role in interactive_roles:
+        if role in self.INTERACTIVE_ROLES:
             return True
         
         parent = ax_data.get('_parent', {})
         if parent:
-            for field in useful_fields:
+            for field in self.USEFUL_FIELDS:
                 value = parent.get(field)
                 if value and str(value).strip():
                     return True
@@ -216,12 +125,20 @@ class AccessibilityHandler:
             return value
         
         if isinstance(value, (list, tuple)):
-            return [AccessibilityHandler._clean_value(v) for v in value]
+            return [AccessibilityHandlerBase._clean_value(v) for v in value]
         
         if isinstance(value, dict):
-            return {k: AccessibilityHandler._clean_value(v) for k, v in value.items()}
+            return {k: AccessibilityHandlerBase._clean_value(v) for k, v in value.items()}
         
         try:
             return str(value)
         except:
             return None
+
+
+if sys.platform == 'darwin':
+    from ._accessibility_mac import AccessibilityHandlerMac as AccessibilityHandler
+elif sys.platform == 'win32':
+    from ._accessibility_windows import AccessibilityHandlerWindows as AccessibilityHandler
+else:
+    raise OSError(f"Unsupported platform for accessibility handler: {sys.platform}")
